@@ -1,0 +1,302 @@
+const db = require('./index');
+const logger = require('../utils/logger');
+
+const createSchema = async () => {
+  try {
+    logger.info('Creating database schema...');
+
+    // Enable extensions
+    await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+    await db.query('CREATE EXTENSION IF NOT EXISTS "postgis"');
+    await db.query('CREATE EXTENSION IF NOT EXISTS "timescaledb" CASCADE');
+
+    // ===== users table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(20) NOT NULL CHECK (role IN ('host', 'buyer', 'investor', 'admin')),
+        full_name VARCHAR(255),
+        phone VARCHAR(20),
+        is_verified BOOLEAN DEFAULT FALSE,
+        is_active BOOLEAN DEFAULT TRUE,
+        kyc_status VARCHAR(20) DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'submitted', 'verified', 'rejected')),
+        failed_login_attempts INTEGER DEFAULT 0,
+        locked_until TIMESTAMPTZ,
+        last_login_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)');
+
+    // ===== hosts table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS hosts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        solar_capacity_kw DECIMAL(10, 2) NOT NULL CHECK (solar_capacity_kw > 0),
+        panel_brand VARCHAR(100),
+        panel_model VARCHAR(100),
+        installation_date DATE,
+        panel_efficiency DECIMAL(5, 4) CHECK (panel_efficiency BETWEEN 0.10 AND 0.30),
+        has_battery BOOLEAN DEFAULT FALSE,
+        battery_capacity_kwh DECIMAL(10, 2) CHECK (battery_capacity_kwh >= 0),
+        location GEOGRAPHY(POINT, 4326),
+        address TEXT,
+        city VARCHAR(100),
+        state VARCHAR(100),
+        pincode VARCHAR(10),
+        meter_id VARCHAR(100) UNIQUE,
+        inverter_brand VARCHAR(100),
+        inverter_capacity_kw DECIMAL(10, 2),
+        roof_type VARCHAR(50),
+        roof_orientation VARCHAR(20),
+        shading_factor DECIMAL(5, 2) CHECK (shading_factor BETWEEN 0 AND 100),
+        pricing_preferences JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_hosts_location ON hosts USING GIST(location)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_hosts_meter_id ON hosts(meter_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_hosts_user_id ON hosts(user_id)');
+
+    // ===== buyers table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS buyers (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        meter_id VARCHAR(100) UNIQUE,
+        monthly_avg_consumption DECIMAL(10, 2),
+        household_size INTEGER CHECK (household_size > 0),
+        has_ac BOOLEAN DEFAULT FALSE,
+        ac_tonnage DECIMAL(5, 2),
+        has_ev BOOLEAN DEFAULT FALSE,
+        ev_battery_kwh DECIMAL(10, 2),
+        house_type VARCHAR(50),
+        location GEOGRAPHY(POINT, 4326),
+        address TEXT,
+        city VARCHAR(100),
+        state VARCHAR(100),
+        pincode VARCHAR(10),
+        preferences JSONB DEFAULT '{"solar_percentage": 70, "max_price": 6.5}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_buyers_location ON buyers USING GIST(location)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_buyers_meter_id ON buyers(meter_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_buyers_user_id ON buyers(user_id)');
+
+    // ===== investors table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS investors (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        total_capital DECIMAL(12, 2) NOT NULL CHECK (total_capital > 0),
+        available_capital DECIMAL(12, 2) NOT NULL CHECK (available_capital >= 0),
+        invested_capital DECIMAL(12, 2) GENERATED ALWAYS AS (total_capital - available_capital) STORED,
+        risk_appetite VARCHAR(20) CHECK (risk_appetite IN ('low', 'medium', 'high')),
+        min_roi_target DECIMAL(5, 2),
+        preferred_locations JSONB DEFAULT '[]',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_investors_user_id ON investors(user_id)');
+
+    // ===== investor_allocations table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS investor_allocations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        investor_id UUID REFERENCES investors(id) ON DELETE CASCADE,
+        host_id UUID REFERENCES hosts(id) ON DELETE CASCADE,
+        investment_amount DECIMAL(12, 2) NOT NULL CHECK (investment_amount > 0),
+        investment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        expected_roi DECIMAL(5, 2),
+        contract_duration_months INTEGER CHECK (contract_duration_months > 0),
+        start_date DATE NOT NULL,
+        end_date DATE,
+        status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('pending', 'active', 'completed', 'cancelled')),
+        total_returns_paid DECIMAL(12, 2) DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        
+        CONSTRAINT unique_investor_host UNIQUE (investor_id, host_id)
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_investor_alloc_investor ON investor_allocations(investor_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_investor_alloc_host ON investor_allocations(host_id)');
+
+    // ===== allocations table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS allocations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        allocation_date DATE NOT NULL,
+        hour INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
+        host_id UUID REFERENCES hosts(id),
+        buyer_id UUID REFERENCES buyers(id),
+        planned_energy_kwh DECIMAL(10, 4) CHECK (planned_energy_kwh >= 0),
+        actual_energy_kwh DECIMAL(10, 4) CHECK (actual_energy_kwh >= 0),
+        price_per_kwh DECIMAL(6, 2) NOT NULL CHECK (price_per_kwh > 0),
+        total_amount DECIMAL(10, 2),
+        status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'executed', 'partial', 'failed')),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        
+        CONSTRAINT unique_allocation_per_hour UNIQUE (allocation_date, hour, host_id, buyer_id)
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_allocations_date_hour ON allocations(allocation_date, hour)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_allocations_host ON allocations(host_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_allocations_buyer ON allocations(buyer_id)');
+
+    // ===== transactions table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS transactions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('energy_sale', 'wallet_topup', 'withdrawal', 'refund', 'fee')),
+        user_id UUID REFERENCES users(id),
+        amount DECIMAL(10, 2) NOT NULL,
+        description TEXT,
+        reference_id UUID,
+        reference_type VARCHAR(50),
+        balance_before DECIMAL(10, 2),
+        balance_after DECIMAL(10, 2),
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'cancelled')),
+        payment_method VARCHAR(50),
+        payment_gateway_txn_id VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        completed_at TIMESTAMPTZ
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(transaction_type)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at)');
+
+    // ===== wallets table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS wallets (
+        user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        balance DECIMAL(10, 2) DEFAULT 0 CHECK (balance >= 0),
+        currency VARCHAR(3) DEFAULT 'INR',
+        last_transaction_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // ===== devices table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS devices (
+        device_id VARCHAR(100) PRIMARY KEY,
+        user_id UUID REFERENCES users(id),
+        device_type VARCHAR(50) NOT NULL CHECK (device_type IN ('solar_meter', 'consumption_meter', 'battery_bms', 'weather_station')),
+        device_model VARCHAR(100),
+        firmware_version VARCHAR(50),
+        mqtt_username VARCHAR(255) UNIQUE,
+        mqtt_password_hash VARCHAR(255),
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'inactive', 'faulty', 'decommissioned')),
+        last_seen_at TIMESTAMPTZ,
+        last_reading JSONB,
+        location GEOGRAPHY(POINT, 4326),
+        installation_date DATE,
+        configuration JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)');
+
+    // ===== energy_readings hypertable (TimescaleDB) =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS energy_readings (
+        time TIMESTAMPTZ NOT NULL,
+        device_id VARCHAR(100) NOT NULL,
+        user_id UUID NOT NULL,
+        measurement_type VARCHAR(50) NOT NULL,
+        power_kw DECIMAL(10, 4),
+        energy_kwh DECIMAL(12, 4),
+        voltage DECIMAL(8, 2),
+        current DECIMAL(8, 2),
+        frequency DECIMAL(5, 2),
+        power_factor DECIMAL(4, 3),
+        battery_soc DECIMAL(5, 2),
+        battery_voltage DECIMAL(8, 2),
+        battery_current DECIMAL(8, 2),
+        temperature DECIMAL(5, 2),
+        metadata JSONB
+      )
+    `);
+
+    // Convert to hypertable if not already
+    try {
+      await db.query(`
+        SELECT create_hypertable('energy_readings', 'time', chunk_time_interval => INTERVAL '1 week', if_not_exists => TRUE)
+      `);
+    } catch (err) {
+      logger.info('Hypertable already exists or unable to create');
+    }
+
+    // Create indexes on energy_readings
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_device_time ON energy_readings (device_id, time DESC)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_user_time ON energy_readings (user_id, time DESC)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_type ON energy_readings (measurement_type)');
+
+    // ===== verification_tokens table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS verification_tokens (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        token VARCHAR(255) UNIQUE NOT NULL,
+        token_type VARCHAR(50) DEFAULT 'email_verification' CHECK (token_type IN ('email_verification', 'password_reset', 'phone_verification')),
+        expires_at TIMESTAMPTZ NOT NULL,
+        is_used BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_verification_tokens_token ON verification_tokens(token)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_verification_tokens_user ON verification_tokens(user_id)');
+
+    // ===== daily_statements table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS daily_statements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id),
+        statement_date DATE NOT NULL,
+        total_cost_or_earnings DECIMAL(10, 2),
+        total_energy_kwh DECIMAL(10, 4),
+        wallet_balance_before DECIMAL(10, 2),
+        wallet_balance_after DECIMAL(10, 2),
+        statement_data JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_daily_statements_user_date ON daily_statements(user_id, statement_date)');
+
+    logger.info('Database schema created successfully');
+    return true;
+  } catch (error) {
+    logger.error('Error creating database schema:', error);
+    throw error;
+  }
+};
+
+module.exports = {
+  createSchema,
+};

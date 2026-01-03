@@ -1,0 +1,76 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: solar_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: solar_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # TimescaleDB Extension
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: solar_timescaledb
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: solar_platform
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: solar_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MQTT Broker (Mosquitto)
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: solar_mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mqtt-config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mqtt-config/passwd:/mosquitto/config/passwd
+      - mqtt_data:/mosquitto/data
+      - mqtt_logs:/mosquitto/log
+
+volumes:
+  postgres_data:
+  timescaledb_data:
+  redis_data:
+  mqtt_data:
+  mqtt_logs:
+
+networks:
+  default:
+    name: solar_network
