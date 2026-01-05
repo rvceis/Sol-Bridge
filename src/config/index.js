@@ -41,6 +41,7 @@ module.exports = {
 
   // MQTT
   mqtt: {
+    enabled: process.env.MQTT_ENABLED === 'true', // Disabled by default
     brokerUrl: process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883',
     username: process.env.MQTT_USERNAME || 'iot_user',
     password: process.env.MQTT_PASSWORD || 'iot_password',
@@ -91,7 +92,7 @@ module.exports = {
   // Logging
   logging: {
     level: process.env.LOG_LEVEL || 'info',
-    format: process.env.LOG_FORMAT || 'json',
+    format: process.env.LOG_FORMAT || 'pretty', // Use 'json' for production
   },
 
   // Rate Limiting

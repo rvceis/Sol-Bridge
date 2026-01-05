@@ -5,10 +5,22 @@ const createSchema = async () => {
   try {
     logger.info('Creating database schema...');
 
-    // Enable extensions
+    // Enable extensions (skip postgis and timescaledb if not installed)
     await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-    await db.query('CREATE EXTENSION IF NOT EXISTS "postgis"');
-    await db.query('CREATE EXTENSION IF NOT EXISTS "timescaledb" CASCADE');
+    
+    // Try postgis, but don't fail if not available (silently skip)
+    try {
+      await db.pool.query('CREATE EXTENSION IF NOT EXISTS "postgis"');
+    } catch (e) {
+      logger.info('PostGIS not installed - location features will use lat/lon');
+    }
+    
+    // Try timescaledb, but don't fail if not available (silently skip)
+    try {
+      await db.pool.query('CREATE EXTENSION IF NOT EXISTS "timescaledb" CASCADE');
+    } catch (e) {
+      logger.info('TimescaleDB not installed - using regular tables');
+    }
 
     // ===== users table =====
     await db.query(`
@@ -46,7 +58,8 @@ const createSchema = async () => {
         panel_efficiency DECIMAL(5, 4) CHECK (panel_efficiency BETWEEN 0.10 AND 0.30),
         has_battery BOOLEAN DEFAULT FALSE,
         battery_capacity_kwh DECIMAL(10, 2) CHECK (battery_capacity_kwh >= 0),
-        location GEOGRAPHY(POINT, 4326),
+        latitude DECIMAL(10, 8),
+        longitude DECIMAL(11, 8),
         address TEXT,
         city VARCHAR(100),
         state VARCHAR(100),
@@ -63,7 +76,7 @@ const createSchema = async () => {
       )
     `);
 
-    await db.query('CREATE INDEX IF NOT EXISTS idx_hosts_location ON hosts USING GIST(location)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_hosts_lat_lon ON hosts(latitude, longitude)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_hosts_meter_id ON hosts(meter_id)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_hosts_user_id ON hosts(user_id)');
 
@@ -80,7 +93,8 @@ const createSchema = async () => {
         has_ev BOOLEAN DEFAULT FALSE,
         ev_battery_kwh DECIMAL(10, 2),
         house_type VARCHAR(50),
-        location GEOGRAPHY(POINT, 4326),
+        latitude DECIMAL(10, 8),
+        longitude DECIMAL(11, 8),
         address TEXT,
         city VARCHAR(100),
         state VARCHAR(100),
@@ -91,7 +105,7 @@ const createSchema = async () => {
       )
     `);
 
-    await db.query('CREATE INDEX IF NOT EXISTS idx_buyers_location ON buyers USING GIST(location)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_buyers_lat_lon ON buyers(latitude, longitude)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_buyers_meter_id ON buyers(meter_id)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_buyers_user_id ON buyers(user_id)');
 
@@ -210,7 +224,8 @@ const createSchema = async () => {
         status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'inactive', 'faulty', 'decommissioned')),
         last_seen_at TIMESTAMPTZ,
         last_reading JSONB,
-        location GEOGRAPHY(POINT, 4326),
+        latitude DECIMAL(10, 8),
+        longitude DECIMAL(11, 8),
         installation_date DATE,
         configuration JSONB DEFAULT '{}',
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -242,13 +257,13 @@ const createSchema = async () => {
       )
     `);
 
-    // Convert to hypertable if not already
+    // Convert to hypertable if not already (only if TimescaleDB is available)
     try {
-      await db.query(`
+      await db.pool.query(`
         SELECT create_hypertable('energy_readings', 'time', chunk_time_interval => INTERVAL '1 week', if_not_exists => TRUE)
       `);
     } catch (err) {
-      logger.info('Hypertable already exists or unable to create');
+      // Silently skip if TimescaleDB is not available
     }
 
     // Create indexes on energy_readings

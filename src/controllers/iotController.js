@@ -16,51 +16,70 @@ const ingestData = asyncHandler(async (req, res) => {
   });
 });
 
-// Get latest reading
+// Get latest reading - uses authenticated user's ID
 const getLatestReading = asyncHandler(async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id; // Get from authenticated user
   const reading = await iotService.getLatestReading(userId);
 
   if (!reading) {
-    return res.status(404).json({
-      error: 'NotFoundError',
-      message: 'No readings found',
+    return res.json({
+      success: true,
+      data: {
+        reading: null,
+        device: null,
+        lastUpdated: new Date().toISOString(),
+        message: 'No readings found. Connect a solar device to start tracking.',
+      },
     });
   }
 
-  res.json(reading);
+  res.json({
+    success: true,
+    data: {
+      reading,
+      device: reading.device || null,
+      lastUpdated: reading.timestamp || new Date().toISOString(),
+    },
+  });
 });
 
-// Get reading history
+// Get reading history - uses authenticated user's ID
 const getReadingHistory = asyncHandler(async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.user.id; // Get from authenticated user
   const {
-    start,
-    end,
-    resolution = 'hourly',
+    startDate,
+    endDate,
+    interval = 'hourly',
     limit = 1000,
   } = req.query;
 
-  if (!start || !end) {
-    return res.status(400).json({
-      error: 'ValidationError',
-      message: 'start and end query parameters required',
-    });
-  }
+  // Default to today if no dates provided
+  const start = startDate ? new Date(startDate) : new Date(new Date().setHours(0, 0, 0, 0));
+  const end = endDate ? new Date(endDate) : new Date();
 
   const readings = await iotService.getReadingHistory(
     userId,
-    new Date(start),
-    new Date(end),
-    resolution
+    start,
+    end,
+    interval
   );
 
   res.json({
-    userId,
-    start,
-    end,
-    resolution,
-    data: readings.slice(0, limit),
+    success: true,
+    data: {
+      readings: readings.slice(0, parseInt(limit)),
+      summary: {
+        totalGeneration: readings.reduce((sum, r) => sum + (r.powerOutput || 0), 0) / 1000, // Convert to kWh
+        totalConsumption: readings.reduce((sum, r) => sum + (r.powerConsumed || 0), 0) / 1000,
+        avgEfficiency: readings.length > 0 ? readings.reduce((sum, r) => sum + (r.efficiency || 0), 0) / readings.length : 0,
+      },
+      pagination: {
+        page: 1,
+        limit: parseInt(limit),
+        total: readings.length,
+        totalPages: 1,
+      },
+    },
   });
 });
 

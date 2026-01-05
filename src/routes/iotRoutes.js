@@ -6,9 +6,9 @@ const { authenticate } = require('../middleware/auth');
 // Public endpoint for IoT devices (would need device auth)
 router.post('/iot/ingest', iotController.ingestData);
 
-// Protected endpoints
-router.get('/iot/latest/:userId', authenticate, iotController.getLatestReading);
-router.get('/iot/history/:userId', authenticate, iotController.getReadingHistory);
+// Protected endpoints - get userId from authenticated user
+router.get('/iot/latest', authenticate, iotController.getLatestReading);
+router.get('/iot/history', authenticate, iotController.getReadingHistory);
 router.post('/iot/devices/register', authenticate, iotController.registerDevice);
 router.post('/iot/devices/:deviceId/command', authenticate, iotController.sendCommand);
 

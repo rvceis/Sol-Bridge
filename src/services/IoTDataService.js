@@ -12,6 +12,12 @@ class IoTDataService {
 
   // Initialize MQTT connection
   async initialize() {
+    // Skip MQTT initialization if disabled
+    if (!config.mqtt.enabled) {
+      logger.info('MQTT is disabled, skipping initialization');
+      return false;
+    }
+
     try {
       this.mqttClient = mqtt.connect(config.mqtt.brokerUrl, {
         username: config.mqtt.username,
@@ -19,6 +25,7 @@ class IoTDataService {
         qos: config.mqtt.qos,
         reconnectPeriod: config.mqtt.reconnectPeriod,
         clean: true,
+        connectTimeout: 5000,
       });
 
       this.mqttClient.on('connect', () => {
@@ -34,7 +41,7 @@ class IoTDataService {
       });
 
       this.mqttClient.on('error', (err) => {
-        logger.error('MQTT error:', err);
+        logger.error('MQTT error:', err.message);
       });
 
       // Message handler
@@ -44,9 +51,20 @@ class IoTDataService {
         });
       });
 
-      return new Promise((resolve) => {
+      // Wait for connection with timeout
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('MQTT connection timeout'));
+        }, 5000);
+        
         this.mqttClient.once('connect', () => {
+          clearTimeout(timeout);
           resolve(true);
+        });
+        
+        this.mqttClient.once('error', (err) => {
+          clearTimeout(timeout);
+          reject(err);
         });
       });
     } catch (error) {

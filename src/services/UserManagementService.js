@@ -44,13 +44,14 @@ class UserManagementService {
         // Create role-specific record
         if (role === 'host') {
           await client.query(
-            `INSERT INTO hosts (user_id, solar_capacity_kw, has_battery, location, address, city, state, pincode)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            `INSERT INTO hosts (user_id, solar_capacity_kw, has_battery, latitude, longitude, address, city, state, pincode)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [
               userId,
-              profile.solar_capacity_kw,
+              profile.solar_capacity_kw || 0,
               profile.has_battery || false,
-              `POINT(${profile.location?.lon || 0} ${profile.location?.lat || 0})`,
+              profile.location?.lat || 0,
+              profile.location?.lon || 0,
               profile.address,
               profile.city,
               profile.state,
@@ -59,14 +60,15 @@ class UserManagementService {
           );
         } else if (role === 'buyer') {
           await client.query(
-            `INSERT INTO buyers (user_id, household_size, has_ac, has_ev, location, address, city, state, pincode)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            `INSERT INTO buyers (user_id, household_size, has_ac, has_ev, latitude, longitude, address, city, state, pincode)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
             [
               userId,
-              profile.household_size,
+              profile.household_size || 1,
               profile.has_ac || false,
               profile.has_ev || false,
-              `POINT(${profile.location?.lon || 0} ${profile.location?.lat || 0})`,
+              profile.location?.lat || 0,
+              profile.location?.lon || 0,
               profile.address,
               profile.city,
               profile.state,
@@ -344,8 +346,12 @@ class UserManagementService {
 
             Object.entries(profile).forEach(([key, value]) => {
               if (key === 'location' && value) {
-                hostUpdates.push(`location = $${hostParamCount}`);
-                hostValues.push(`POINT(${value.lon} ${value.lat})`);
+                // Use separate lat/lon columns instead of PostGIS POINT
+                hostUpdates.push(`latitude = $${hostParamCount}`);
+                hostValues.push(value.lat || 0);
+                hostParamCount++;
+                hostUpdates.push(`longitude = $${hostParamCount}`);
+                hostValues.push(value.lon || 0);
               } else {
                 hostUpdates.push(`${key} = $${hostParamCount}`);
                 hostValues.push(value);

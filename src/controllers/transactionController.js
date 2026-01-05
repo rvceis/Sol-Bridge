@@ -3,23 +3,46 @@ const { asyncHandler } = require('../utils/errors');
 
 // Get wallet balance
 const getWalletBalance = asyncHandler(async (req, res) => {
-  const wallet = await transactionService.getWalletBalance(req.user.id);
-  res.json(wallet);
+  const walletData = await transactionService.getWalletBalance(req.user.id);
+  
+  res.json({
+    success: true,
+    data: {
+      wallet: {
+        balance: walletData?.balance || 0,
+        currency: 'INR',
+        lastUpdated: walletData?.updated_at || new Date().toISOString(),
+      },
+      pendingTransactions: walletData?.pending_count || 0,
+      recentActivity: walletData?.recent_transactions || [],
+    },
+  });
 });
 
 // Get transaction history
 const getTransactionHistory = asyncHandler(async (req, res) => {
-  const { limit = 100, offset = 0 } = req.query;
+  const { limit = 20, page = 1, type, status, startDate, endDate } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  
   const transactions = await transactionService.getTransactionHistory(
     req.user.id,
     parseInt(limit),
-    parseInt(offset)
+    offset
   );
 
+  const total = transactions.length; // TODO: Get actual count from DB
+
   res.json({
-    transactions,
-    limit: parseInt(limit),
-    offset: parseInt(offset),
+    success: true,
+    data: {
+      data: transactions,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)) || 1,
+      },
+    },
   });
 });
 
