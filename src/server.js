@@ -11,12 +11,14 @@ const { errorHandler, responseMiddleware } = require('./utils/response');
 const { authenticate, createRateLimiter, corsOptions } = require('./middleware/auth');
 const db = require('./database');
 const { createSchema } = require('./database/schema');
-const { redis } = require('./utils/cache');
+const { redis, redisAvailable } = require('./utils/cache');
 
 // Routes
 const authRoutes = require('./routes/authRoutes');
 const iotRoutes = require('./routes/iotRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+const marketplaceRoutes = require('./routes/marketplaceRoutes');
 
 // Services
 const iotService = require('./services/IoTDataService');
@@ -39,9 +41,13 @@ app.use(pinoHttp({ logger }));
 // Standard Response Middleware
 app.use(responseMiddleware);
 
-// Rate limiting
-const rateLimiter = createRateLimiter(redis, config.rateLimit.windowMs, config.rateLimit.maxRequests);
-app.use('/api/', rateLimiter);
+// Rate limiting (if Redis available)
+if (redisAvailable()) {
+  const rateLimiter = createRateLimiter(redis, config.rateLimit.windowMs, config.rateLimit.maxRequests);
+  app.use('/api/', rateLimiter);
+} else {
+  logger.warn('Rate limiting disabled (requires Redis)');
+}
 
 // ===== Health Check =====
 app.get('/health', (req, res) => {
@@ -56,6 +62,8 @@ app.get('/health', (req, res) => {
 app.use(`/api/${config.apiVersion}`, authRoutes);
 app.use(`/api/${config.apiVersion}`, iotRoutes);
 app.use(`/api/${config.apiVersion}`, transactionRoutes);
+app.use(`/api/${config.apiVersion}/users`, profileRoutes);
+app.use(`/api/${config.apiVersion}/marketplace`, marketplaceRoutes);
 
 // ===== 404 Handler =====
 app.use((req, res) => {
@@ -112,7 +120,10 @@ const startServer = async () => {
         }
 
         await db.closePool();
-        await redis.quit();
+        
+        if (redis) {
+          await redis.quit();
+        }
 
         logger.info('All connections closed');
         process.exit(0);

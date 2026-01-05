@@ -30,7 +30,7 @@ class UserManagementService {
         const userId = uuidv4();
         const userResult = await client.query(
           `INSERT INTO users (id, email, password_hash, role, full_name, phone, is_verified)
-           VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+           VALUES ($1, $2, $3, $4, $5, $6, TRUE)
            RETURNING id, email, role`,
           [userId, email.toLowerCase(), passwordHash, role, full_name, phone]
         );
@@ -158,11 +158,6 @@ class UserManagementService {
       }
 
       throw new AuthenticationError('Invalid credentials');
-    }
-
-    // Check if email verified
-    if (!user.is_verified) {
-      throw new ValidationError('Please verify your email before logging in');
     }
 
     // Check if account is active

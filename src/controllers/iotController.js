@@ -85,9 +85,105 @@ const getReadingHistory = asyncHandler(async (req, res) => {
 
 // Register device
 const registerDevice = asyncHandler(async (req, res) => {
-  // TODO: Implement device registration
+  const userId = req.user.id;
+  const { deviceType, deviceModel, firmwareVersion } = req.body;
+
+  if (!deviceType) {
+    return res.status(400).json({
+      success: false,
+      error: 'ValidationError',
+      message: 'deviceType is required',
+    });
+  }
+
+  const validTypes = ['solar_meter', 'consumption_meter', 'battery_bms', 'weather_station'];
+  if (!validTypes.includes(deviceType)) {
+    return res.status(400).json({
+      success: false,
+      error: 'ValidationError',
+      message: 'Invalid deviceType. Must be one of: ' + validTypes.join(', '),
+    });
+  }
+
+  const device = await iotService.registerDevice({
+    userId,
+    deviceType,
+    deviceModel,
+    firmwareVersion,
+  });
+
   res.json({
-    message: 'Device registration endpoint',
+    success: true,
+    data: {
+      device,
+      message: 'Device registered successfully',
+    },
+  });
+});
+
+// Get all devices for user
+const getDevices = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const devices = await iotService.getUserDevices(userId);
+
+  res.json({
+    success: true,
+    data: {
+      devices,
+      count: devices.length,
+    },
+  });
+});
+
+// Get single device
+const getDevice = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { deviceId } = req.params;
+
+  const device = await iotService.getDeviceById(deviceId, userId);
+
+  if (!device) {
+    return res.status(404).json({
+      success: false,
+      error: 'NotFoundError',
+      message: 'Device not found',
+    });
+  }
+
+  res.json({
+    success: true,
+    data: { device },
+  });
+});
+
+// Update device
+const updateDevice = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { deviceId } = req.params;
+  const { deviceModel, status, configuration } = req.body;
+
+  const device = await iotService.updateDevice(deviceId, userId, {
+    deviceModel,
+    status,
+    configuration,
+  });
+
+  res.json({
+    success: true,
+    data: { device },
+  });
+});
+
+// Delete device
+const deleteDevice = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { deviceId } = req.params;
+
+  await iotService.deleteDevice(deviceId, userId);
+
+  res.json({
+    success: true,
+    message: 'Device deleted successfully',
   });
 });
 
@@ -118,5 +214,9 @@ module.exports = {
   getLatestReading,
   getReadingHistory,
   registerDevice,
+  getDevices,
+  getDevice,
+  updateDevice,
+  deleteDevice,
   sendCommand,
 };

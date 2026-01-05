@@ -2,22 +2,34 @@ const Redis = require('ioredis');
 const config = require('../config');
 const logger = require('../utils/logger');
 
-const redis = new Redis(config.redis);
+let redis = null;
+let redisAvailable = false;
 
-redis.on('connect', () => {
-  logger.info('Redis connected');
-});
+try {
+  redis = new Redis(config.redis);
+  
+  redis.on('connect', () => {
+    redisAvailable = true;
+    logger.info('Redis connected');
+  });
+  
+  redis.on('error', (err) => {
+    redisAvailable = false;
+    logger.warn('Redis error (caching disabled):', err.message);
+  });
+  
+  redis.on('close', () => {
+    redisAvailable = false;
+    logger.info('Redis connection closed');
+  });
+} catch (err) {
+  logger.warn('Redis initialization failed, caching disabled:', err.message);
+  redisAvailable = false;
+}
 
-redis.on('error', (err) => {
-  logger.error('Redis error:', err);
-});
-
-redis.on('close', () => {
-  logger.info('Redis connection closed');
-});
-
-// Cache wrapper with TTL
+// Cache wrapper with TTL (gracefully degrades if Redis unavailable)
 const cacheSet = async (key, value, ttl = 3600) => {
+  if (!redisAvailable || !redis) return;
   try {
     const serialized = JSON.stringify(value);
     if (ttl) {
@@ -26,25 +38,27 @@ const cacheSet = async (key, value, ttl = 3600) => {
       await redis.set(key, serialized);
     }
   } catch (error) {
-    logger.error('Cache set error:', error);
+    logger.warn('Cache set error:', error.message);
   }
 };
 
 const cacheGet = async (key) => {
+  if (!redisAvailable || !redis) return null;
   try {
     const value = await redis.get(key);
     return value ? JSON.parse(value) : null;
   } catch (error) {
-    logger.error('Cache get error:', error);
+    logger.warn('Cache get error:', error.message);
     return null;
   }
 };
 
 const cacheDel = async (key) => {
+  if (!redisAvailable || !redis) return;
   try {
     await redis.del(key);
   } catch (error) {
-    logger.error('Cache delete error:', error);
+    logger.warn('Cache delete error:', error.message);
   }
 };
 
@@ -61,6 +75,7 @@ const cacheClear = async (pattern) => {
 
 module.exports = {
   redis,
+  redisAvailable: () => redisAvailable,
   cacheSet,
   cacheGet,
   cacheDel,

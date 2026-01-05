@@ -482,6 +482,120 @@ class IoTDataService {
     }
   }
 
+  // Device Management Methods
+
+  async registerDevice({ userId, deviceType, deviceModel, firmwareVersion }) {
+    try {
+      const deviceId = `${deviceType}-${userId.slice(0, 8)}-${Date.now()}`;
+      const query = `
+        INSERT INTO devices (device_id, user_id, device_type, device_model, firmware_version, status)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *
+      `;
+      const result = await db.query(query, [
+        deviceId,
+        userId,
+        deviceType,
+        deviceModel || null,
+        firmwareVersion || null,
+        'active'
+      ]);
+
+      logger.info('Device registered:', { deviceId, userId, deviceType });
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error registering device:', error);
+      throw error;
+    }
+  }
+
+  async getUserDevices(userId) {
+    try {
+      const query = `
+        SELECT device_id, user_id, device_type, device_model, firmware_version, status, 
+               last_seen_at, installation_date, created_at, updated_at,
+               last_reading
+        FROM devices
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+      `;
+      const result = await db.query(query, [userId]);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error fetching user devices:', error);
+      throw error;
+    }
+  }
+
+  async getDeviceById(deviceId, userId) {
+    try {
+      const query = `
+        SELECT device_id, user_id, device_type, device_model, firmware_version, status, 
+               last_seen_at, installation_date, created_at, updated_at,
+               last_reading
+        FROM devices
+        WHERE device_id = $1 AND user_id = $2
+      `;
+      const result = await db.query(query, [deviceId, userId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error fetching device:', error);
+      throw error;
+    }
+  }
+
+  async updateDevice(deviceId, userId, { deviceModel, status, configuration }) {
+    try {
+      const updates = [];
+      const values = [deviceId, userId];
+      let paramCount = 3;
+
+      if (deviceModel !== undefined) {
+        updates.push(`device_model = $${paramCount++}`);
+        values.push(deviceModel);
+      }
+      if (status !== undefined) {
+        updates.push(`status = $${paramCount++}`);
+        values.push(status);
+      }
+      if (configuration !== undefined) {
+        updates.push(`configuration = $${paramCount++}`);
+        values.push(JSON.stringify(configuration));
+      }
+
+      updates.push(`updated_at = NOW()`);
+
+      const query = `
+        UPDATE devices
+        SET ${updates.join(', ')}
+        WHERE device_id = $1 AND user_id = $2
+        RETURNING *
+      `;
+
+      const result = await db.query(query, values);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error updating device:', error);
+      throw error;
+    }
+  }
+
+  async deleteDevice(deviceId, userId) {
+    try {
+      const query = `
+        DELETE FROM devices
+        WHERE device_id = $1 AND user_id = $2
+        RETURNING device_id
+      `;
+      const result = await db.query(query, [deviceId, userId]);
+      logger.info('Device deleted:', { deviceId, userId });
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error deleting device:', error);
+      throw error;
+    }
+  }
+
   // Close MQTT connection
   async close() {
     return new Promise((resolve) => {

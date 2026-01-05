@@ -31,7 +31,7 @@ const createSchema = async () => {
         role VARCHAR(20) NOT NULL CHECK (role IN ('host', 'buyer', 'investor', 'admin')),
         full_name VARCHAR(255),
         phone VARCHAR(20),
-        is_verified BOOLEAN DEFAULT FALSE,
+        is_verified BOOLEAN DEFAULT TRUE,
         is_active BOOLEAN DEFAULT TRUE,
         kyc_status VARCHAR(20) DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'submitted', 'verified', 'rejected')),
         failed_login_attempts INTEGER DEFAULT 0,
@@ -304,10 +304,190 @@ const createSchema = async () => {
 
     await db.query('CREATE INDEX IF NOT EXISTS idx_daily_statements_user_date ON daily_statements(user_id, statement_date)');
 
+    // ===== user_addresses table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_addresses (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        address_type VARCHAR(20) DEFAULT 'home' CHECK (address_type IN ('home', 'work', 'billing', 'other')),
+        address_line1 TEXT NOT NULL,
+        address_line2 TEXT,
+        city VARCHAR(100) NOT NULL,
+        state VARCHAR(100) NOT NULL,
+        postal_code VARCHAR(20) NOT NULL,
+        country VARCHAR(100) DEFAULT 'India',
+        latitude DECIMAL(10, 8),
+        longitude DECIMAL(11, 8),
+        is_default BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_addresses_user_id ON user_addresses(user_id)');
+
+    // ===== payment_methods table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payment_methods (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        method_type VARCHAR(20) NOT NULL CHECK (method_type IN ('card', 'upi', 'bank_transfer', 'wallet')),
+        card_last4 VARCHAR(4),
+        card_brand VARCHAR(20),
+        card_exp_month INTEGER CHECK (card_exp_month BETWEEN 1 AND 12),
+        card_exp_year INTEGER,
+        upi_id VARCHAR(100),
+        bank_name VARCHAR(100),
+        account_number_last4 VARCHAR(4),
+        ifsc_code VARCHAR(20),
+        wallet_provider VARCHAR(50),
+        is_default BOOLEAN DEFAULT FALSE,
+        is_verified BOOLEAN DEFAULT FALSE,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payment_methods_user_id ON payment_methods(user_id)');
+
+    // ===== user_documents table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_documents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        document_type VARCHAR(50) NOT NULL CHECK (document_type IN ('identity', 'address_proof', 'bank_statement', 'pan_card', 'aadhaar', 'other')),
+        document_name VARCHAR(255) NOT NULL,
+        file_path TEXT NOT NULL,
+        file_size INTEGER,
+        mime_type VARCHAR(100),
+        verification_status VARCHAR(20) DEFAULT 'pending' CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+        rejection_reason TEXT,
+        verified_at TIMESTAMPTZ,
+        verified_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_documents_user_id ON user_documents(user_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_documents_type ON user_documents(document_type)');
+
+    // ===== user_preferences table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_preferences (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        notifications_push BOOLEAN DEFAULT TRUE,
+        notifications_email BOOLEAN DEFAULT TRUE,
+        notifications_sms BOOLEAN DEFAULT FALSE,
+        notifications_marketing BOOLEAN DEFAULT TRUE,
+        security_two_factor BOOLEAN DEFAULT FALSE,
+        security_biometric BOOLEAN DEFAULT FALSE,
+        theme VARCHAR(10) DEFAULT 'light' CHECK (theme IN ('light', 'dark', 'auto')),
+        language VARCHAR(5) DEFAULT 'en',
+        currency VARCHAR(3) DEFAULT 'INR',
+        timezone VARCHAR(50) DEFAULT 'Asia/Kolkata',
+        auto_update BOOLEAN DEFAULT TRUE,
+        analytics_enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON user_preferences(user_id)');
+
+    // ===== energy_listings table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS energy_listings (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        seller_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        device_id VARCHAR(100) REFERENCES devices(device_id),
+        energy_amount_kwh DECIMAL(10, 4) NOT NULL CHECK (energy_amount_kwh > 0),
+        price_per_kwh DECIMAL(10, 2) NOT NULL CHECK (price_per_kwh > 0),
+        available_from TIMESTAMPTZ NOT NULL,
+        available_to TIMESTAMPTZ NOT NULL,
+        listing_type VARCHAR(20) DEFAULT 'spot' CHECK (listing_type IN ('spot', 'forward', 'subscription')),
+        status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'sold', 'expired', 'cancelled')),
+        min_purchase_kwh DECIMAL(10, 4) DEFAULT 1.0,
+        location_latitude DECIMAL(10, 8),
+        location_longitude DECIMAL(11, 8),
+        renewable_cert BOOLEAN DEFAULT TRUE,
+        description TEXT,
+        metadata JSONB DEFAULT '{}',
+        views_count INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT check_availability_dates CHECK (available_to > available_from)
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_seller ON energy_listings(seller_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_status ON energy_listings(status)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_dates ON energy_listings(available_from, available_to)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_price ON energy_listings(price_per_kwh)');
+
+    // ===== energy_transactions table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS energy_transactions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        listing_id UUID REFERENCES energy_listings(id),
+        buyer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        seller_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        energy_amount_kwh DECIMAL(10, 4) NOT NULL CHECK (energy_amount_kwh > 0),
+        price_per_kwh DECIMAL(10, 2) NOT NULL,
+        total_price DECIMAL(12, 2) NOT NULL,
+        platform_fee DECIMAL(10, 2) DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'refunded')),
+        payment_method_id UUID REFERENCES payment_methods(id),
+        payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'processing', 'completed', 'failed', 'refunded')),
+        payment_transaction_id VARCHAR(255),
+        delivery_start TIMESTAMPTZ,
+        delivery_end TIMESTAMPTZ,
+        delivery_status VARCHAR(20) DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'in_progress', 'completed', 'failed')),
+        energy_delivered_kwh DECIMAL(10, 4),
+        rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+        review TEXT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_buyer ON energy_transactions(buyer_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_seller ON energy_transactions(seller_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_listing ON energy_transactions(listing_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_status ON energy_transactions(status)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_created ON energy_transactions(created_at DESC)');
+
+    // ===== market_statistics table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS market_statistics (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        stat_date DATE NOT NULL,
+        total_listings INTEGER DEFAULT 0,
+        active_listings INTEGER DEFAULT 0,
+        total_transactions INTEGER DEFAULT 0,
+        total_energy_traded_kwh DECIMAL(15, 4) DEFAULT 0,
+        total_value DECIMAL(15, 2) DEFAULT 0,
+        avg_price_per_kwh DECIMAL(10, 2),
+        min_price_per_kwh DECIMAL(10, 2),
+        max_price_per_kwh DECIMAL(10, 2),
+        unique_buyers INTEGER DEFAULT 0,
+        unique_sellers INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(stat_date)
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_market_statistics_date ON market_statistics(stat_date DESC)');
+
     logger.info('Database schema created successfully');
     return true;
   } catch (error) {
-    logger.error('Error creating database schema:', error);
+    logger.error('Error creating database schema:', error.message);
+    logger.error('Stack trace:', error.stack);
+    console.error('FULL ERROR:', error);
     throw error;
   }
 };

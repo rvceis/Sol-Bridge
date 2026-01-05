@@ -49,7 +49,7 @@ const authorize = (...allowedRoles) => {
 // Rate limiting middleware
 const createRateLimiter = (redis, windowMs = 60000, maxRequests = 100) => {
   return async (req, res, next) => {
-    if (!req.user) {
+    if (!req.user || !redis) {
       return next();
     }
 
@@ -76,7 +76,7 @@ const createRateLimiter = (redis, windowMs = 60000, maxRequests = 100) => {
 
       next();
     } catch (error) {
-      logger.error('Rate limiter error:', error);
+      logger.warn('Rate limiter error (continuing without rate limit):', error.message);
       next(); // Allow request on error
     }
   };

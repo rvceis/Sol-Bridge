@@ -9,7 +9,15 @@ router.post('/iot/ingest', iotController.ingestData);
 // Protected endpoints - get userId from authenticated user
 router.get('/iot/latest', authenticate, iotController.getLatestReading);
 router.get('/iot/history', authenticate, iotController.getReadingHistory);
-router.post('/iot/devices/register', authenticate, iotController.registerDevice);
+
+// Device Management endpoints
+router.post('/iot/devices', authenticate, iotController.registerDevice);
+router.get('/iot/devices', authenticate, iotController.getDevices);
+router.get('/iot/devices/:deviceId', authenticate, iotController.getDevice);
+router.put('/iot/devices/:deviceId', authenticate, iotController.updateDevice);
+router.delete('/iot/devices/:deviceId', authenticate, iotController.deleteDevice);
+
+// Device command endpoint
 router.post('/iot/devices/:deviceId/command', authenticate, iotController.sendCommand);
 
 module.exports = router;
