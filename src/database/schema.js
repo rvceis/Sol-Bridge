@@ -235,6 +235,7 @@ const createSchema = async () => {
 
     await db.query('CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_devices_location ON devices(latitude, longitude) WHERE latitude IS NOT NULL AND longitude IS NOT NULL');
 
     // ===== energy_readings hypertable (TimescaleDB) =====
     await db.query(`
@@ -325,6 +326,8 @@ const createSchema = async () => {
     `);
 
     await db.query('CREATE INDEX IF NOT EXISTS idx_user_addresses_user_id ON user_addresses(user_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_addresses_location ON user_addresses(latitude, longitude) WHERE latitude IS NOT NULL AND longitude IS NOT NULL');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_addresses_default ON user_addresses(user_id) WHERE is_default = true');
 
     // ===== payment_methods table =====
     await db.query(`
@@ -402,7 +405,7 @@ const createSchema = async () => {
       CREATE TABLE IF NOT EXISTS energy_listings (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         seller_id UUID REFERENCES users(id) ON DELETE CASCADE,
-        device_id VARCHAR(100) REFERENCES devices(device_id),
+        device_id VARCHAR(100),
         energy_amount_kwh DECIMAL(10, 4) NOT NULL CHECK (energy_amount_kwh > 0),
         price_per_kwh DECIMAL(10, 2) NOT NULL CHECK (price_per_kwh > 0),
         available_from TIMESTAMPTZ NOT NULL,
@@ -426,6 +429,7 @@ const createSchema = async () => {
     await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_status ON energy_listings(status)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_dates ON energy_listings(available_from, available_to)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_price ON energy_listings(price_per_kwh)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_energy_listings_location ON energy_listings(location_latitude, location_longitude) WHERE location_latitude IS NOT NULL AND location_longitude IS NOT NULL');
 
     // ===== energy_transactions table =====
     await db.query(`
@@ -459,6 +463,109 @@ const createSchema = async () => {
     await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_listing ON energy_transactions(listing_id)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_status ON energy_transactions(status)');
     await db.query('CREATE INDEX IF NOT EXISTS idx_energy_transactions_created ON energy_transactions(created_at DESC)');
+
+    // ===== payments table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
+        currency VARCHAR(3) DEFAULT 'INR',
+        payment_type VARCHAR(30) NOT NULL CHECK (payment_type IN ('wallet_topup', 'energy_purchase', 'refund', 'withdrawal')),
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'refunded')),
+        gateway VARCHAR(20) CHECK (gateway IN ('razorpay', 'stripe', 'paytm', 'phonepe', 'wallet')),
+        gateway_order_id VARCHAR(255),
+        gateway_payment_id VARCHAR(255),
+        reference_id UUID,
+        reference_type VARCHAR(50),
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        completed_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_type ON payments(payment_type)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_gateway_order ON payments(gateway_order_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_reference ON payments(reference_id, reference_type)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at DESC)');
+
+    // ===== solar_verifications table =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS solar_verifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        
+        -- Status
+        verification_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+        rejection_reason TEXT,
+        
+        -- Documents (file paths)
+        electricity_bill_path TEXT,
+        solar_invoice_path TEXT,
+        installation_certificate_path TEXT,
+        net_metering_agreement_path TEXT,
+        subsidy_approval_path TEXT,
+        property_proof_path TEXT,
+        kyc_documents_path TEXT,
+        
+        -- Extracted Data (from OCR)
+        consumer_number VARCHAR(100),
+        panel_capacity_kw DECIMAL(10, 2),
+        installer_name VARCHAR(255),
+        installer_mnre_reg VARCHAR(100),
+        net_metering_number VARCHAR(100),
+        subsidy_id VARCHAR(100),
+        installation_date DATE,
+        
+        -- Validation Results
+        cross_document_check_passed BOOLEAN DEFAULT FALSE,
+        format_validation_passed BOOLEAN DEFAULT FALSE,
+        date_logic_check_passed BOOLEAN DEFAULT FALSE,
+        installer_verified BOOLEAN DEFAULT FALSE,
+        
+        -- AI Analysis
+        document_authenticity_score DECIMAL(5, 2),
+        ai_flags JSONB DEFAULT '{}',
+        
+        -- Government Verification
+        govt_api_verified BOOLEAN DEFAULT FALSE,
+        govt_response JSONB DEFAULT '{}',
+        
+        -- Admin Review
+        reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        reviewed_at TIMESTAMPTZ,
+        admin_notes TEXT,
+        
+        -- Metadata
+        submitted_at TIMESTAMPTZ DEFAULT NOW(),
+        approved_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_verifications_user ON solar_verifications(user_id)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_verifications_status ON solar_verifications(verification_status)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_verifications_submitted ON solar_verifications(submitted_at DESC)');
+
+    // Add verification fields to users table if not exists
+    await db.query(`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='is_verified_seller') THEN
+          ALTER TABLE users ADD COLUMN is_verified_seller BOOLEAN DEFAULT FALSE;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='verification_id') THEN
+          ALTER TABLE users ADD COLUMN verification_id UUID REFERENCES solar_verifications(id) ON DELETE SET NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='verified_at') THEN
+          ALTER TABLE users ADD COLUMN verified_at TIMESTAMPTZ;
+        END IF;
+      END $$;
+    `);
 
     // ===== market_statistics table =====
     await db.query(`

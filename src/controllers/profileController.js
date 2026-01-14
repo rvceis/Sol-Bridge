@@ -5,7 +5,15 @@ class ProfileController {
   // Get user profile
   async getProfile(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'User not authenticated'
+        });
+      }
+      
       const profile = await ProfileService.getUserProfile(userId);
       
       res.json({
@@ -24,7 +32,10 @@ class ProfileController {
   // Update user profile
   async updateProfile(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
       const updates = req.body;
       
       const profile = await ProfileService.updateUserProfile(userId, updates);
@@ -46,7 +57,10 @@ class ProfileController {
   // Get addresses
   async getAddresses(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
       const addresses = await ProfileService.getUserAddresses(userId);
       
       res.json({
@@ -65,7 +79,10 @@ class ProfileController {
   // Add address
   async addAddress(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
       const addressData = req.body;
       
       const address = await ProfileService.addUserAddress(userId, addressData);
@@ -87,7 +104,10 @@ class ProfileController {
   // Update address
   async updateAddress(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
       const { id } = req.params;
       const updates = req.body;
       
@@ -110,7 +130,10 @@ class ProfileController {
   // Delete address
   async deleteAddress(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
       const { id } = req.params;
       
       await ProfileService.deleteUserAddress(userId, id);

@@ -19,6 +19,9 @@ const iotRoutes = require('./routes/iotRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const marketplaceRoutes = require('./routes/marketplaceRoutes');
+const deviceRoutes = require('./routes/deviceRoutes');
+const locationRoutes = require('./routes/locationRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 // Services
 const iotService = require('./services/IoTDataService');
@@ -64,6 +67,9 @@ app.use(`/api/${config.apiVersion}`, iotRoutes);
 app.use(`/api/${config.apiVersion}`, transactionRoutes);
 app.use(`/api/${config.apiVersion}/users`, profileRoutes);
 app.use(`/api/${config.apiVersion}/marketplace`, marketplaceRoutes);
+app.use(`/api/${config.apiVersion}/devices`, deviceRoutes);
+app.use(`/api/${config.apiVersion}/location`, locationRoutes);
+app.use(`/api/${config.apiVersion}/payment`, paymentRoutes);
 
 // ===== 404 Handler =====
 app.use((req, res) => {

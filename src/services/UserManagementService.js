@@ -108,10 +108,27 @@ class UserManagementService {
 
       // TODO: Send verification email with result.verificationToken
 
+      // Auto-generate tokens so frontend can stay logged in after registration
+      const tokens = generateTokenPair({
+        id: result.userId,
+        email: email.toLowerCase(),
+        role,
+      });
+
+      // Fetch full profile to mirror login response shape
+      const profile = await this.getProfile(result.userId, role);
+
       return {
-        user_id: result.userId,
-        email: result.email,
-        message: 'Registration successful. Please check email for verification link.',
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: 86400,
+        user: {
+          id: result.userId,
+          email: email.toLowerCase(),
+          role,
+          ...profile,
+        },
+        verificationToken: result.verificationToken,
       };
     } catch (error) {
       throw error;

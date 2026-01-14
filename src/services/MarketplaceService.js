@@ -60,7 +60,7 @@ class MarketplaceService {
           d.device_type
         FROM energy_listings l
         JOIN users u ON l.seller_id = u.id
-        LEFT JOIN devices d ON l.device_id = d.id
+        LEFT JOIN devices d ON l.device_id = d.device_id
         WHERE l.status = 'active'
           AND l.available_to > NOW()
       `;
