@@ -237,15 +237,78 @@ class ProfileController {
     try {
       const userId = req.user.id;
       const { document_type, document_name } = req.body;
-      
-      // In real implementation, you'd handle file upload here
-      // For now, we'll use a placeholder
+      const file = req.file;
+
+      // Validate input
+      if (!document_type) {
+        return res.status(400).json({
+          success: false,
+          error: 'document_type is required'
+        });
+      }
+
+      if (!document_name || !document_name.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'document_name is required'
+        });
+      }
+
+      // For file-based uploads (when using multer middleware)
+      let filePath = null;
+      let fileSize = 0;
+      let mimeType = 'application/octet-stream';
+
+      if (file) {
+        // File was uploaded via multipart/form-data
+        filePath = file.path;
+        fileSize = file.size;
+        mimeType = file.mimetype;
+
+        // Validate file size (max 10MB)
+        if (fileSize > 10 * 1024 * 1024) {
+          return res.status(400).json({
+            success: false,
+            error: 'File size exceeds 10MB limit'
+          });
+        }
+
+        // Validate file type
+        const allowedMimeTypes = [
+          'application/pdf',
+          'image/jpeg',
+          'image/png',
+          'image/jpg',
+          'image/gif'
+        ];
+
+        if (!allowedMimeTypes.includes(mimeType)) {
+          return res.status(400).json({
+            success: false,
+            error: 'File type not allowed. Only PDF and images (JPG, PNG, GIF) are accepted'
+          });
+        }
+      } else {
+        // No file provided - use placeholder
+        filePath = `/uploads/documents/${userId}/${Date.now()}-${document_name}`;
+        fileSize = 0;
+      }
+
+      // Validate document type
+      const validTypes = ['identity', 'address_proof', 'bank_statement', 'pan_card', 'aadhaar', 'other'];
+      if (!validTypes.includes(document_type)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid document_type. Must be one of: ${validTypes.join(', ')}`
+        });
+      }
+
       const documentData = {
         document_type,
-        document_name,
-        file_path: `/uploads/documents/${userId}/${Date.now()}-${document_name}`,
-        file_size: 1024, // placeholder
-        mime_type: 'application/pdf' // placeholder
+        document_name: document_name.trim(),
+        file_path: filePath,
+        file_size: fileSize,
+        mime_type: mimeType
       };
       
       const document = await ProfileService.addUserDocument(userId, documentData);

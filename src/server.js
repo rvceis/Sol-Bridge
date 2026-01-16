@@ -22,6 +22,11 @@ const marketplaceRoutes = require('./routes/marketplaceRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const verificationRoutes = require('./routes/verificationRoutes');
+const notificationRoutes = require('./routes/notifications');
+const profileKYCRoutes = require('./routes/profile');
+const bankAccountRoutes = require('./routes/bankAccounts');
+const withdrawalRoutes = require('./routes/withdrawals');
 
 // Services
 const iotService = require('./services/IoTDataService');
@@ -38,8 +43,21 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Logging
-app.use(pinoHttp({ logger }));
+// Custom request logging (cleaner than pinoHttp)
+app.use((req, res, next) => {
+  const start = Date.now();
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const statusColor = res.statusCode >= 500 ? '🔴' : res.statusCode >= 400 ? '🟡' : '🟢';
+    
+    logger.info(
+      `${statusColor} ${req.method} ${req.path} - ${res.statusCode} - ${duration}ms - User: ${req.user?.id || 'anonymous'}`
+    );
+  });
+  
+  next();
+});
 
 // Standard Response Middleware
 app.use(responseMiddleware);
@@ -70,6 +88,11 @@ app.use(`/api/${config.apiVersion}/marketplace`, marketplaceRoutes);
 app.use(`/api/${config.apiVersion}/devices`, deviceRoutes);
 app.use(`/api/${config.apiVersion}/location`, locationRoutes);
 app.use(`/api/${config.apiVersion}/payment`, paymentRoutes);
+app.use(`/api/${config.apiVersion}/verification`, verificationRoutes);
+app.use(`/api/${config.apiVersion}/notifications`, notificationRoutes);
+app.use(`/api/${config.apiVersion}/profile`, profileKYCRoutes);
+app.use(`/api/${config.apiVersion}/bank-accounts`, bankAccountRoutes);
+app.use(`/api/${config.apiVersion}/withdrawals`, withdrawalRoutes);
 
 // ===== 404 Handler =====
 app.use((req, res) => {

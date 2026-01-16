@@ -1,5 +1,6 @@
 const db = require('../database');
 const logger = require('../utils/logger');
+const PushNotificationService = require('./PushNotificationService');
 
 class MarketplaceService {
   // Create energy listing
@@ -56,8 +57,8 @@ class MarketplaceService {
           l.*,
           u.full_name as seller_name,
           u.kyc_status as seller_kyc_status,
-          d.device_name,
-          d.device_type
+          d.device_type,
+          d.device_model
         FROM energy_listings l
         JOIN users u ON l.seller_id = u.id
         LEFT JOIN devices d ON l.device_id = d.device_id
@@ -136,13 +137,13 @@ class MarketplaceService {
           u.email as seller_email,
           u.phone as seller_phone,
           u.kyc_status as seller_kyc_status,
-          d.device_name,
           d.device_type,
-          d.capacity_kw,
-          d.manufacturer
+          d.device_model,
+          d.firmware_version,
+          d.status as device_status
         FROM energy_listings l
         JOIN users u ON l.seller_id = u.id
-        LEFT JOIN devices d ON l.device_id = d.id
+        LEFT JOIN devices d ON l.device_id = d.device_id
         WHERE l.id = $1
       `, [listingId]);
 
@@ -301,6 +302,14 @@ class MarketplaceService {
           SET energy_amount_kwh = 0, status = 'sold', updated_at = NOW()
           WHERE id = $1
         `, [listing_id]);
+        
+        // Send notification to seller (listing sold out)
+        PushNotificationService.notifyListingSold(
+          listing.seller_id,
+          listing_id,
+          energy_amount_kwh,
+          total_price
+        ).catch(err => logger.error('Failed to send sold notification:', err));
       } else {
         // Update remaining energy
         await client.query(`
@@ -309,6 +318,16 @@ class MarketplaceService {
           WHERE id = $2
         `, [remaining_energy, listing_id]);
       }
+      
+      // Send payment received notification to seller
+      const buyerResult = await client.query('SELECT full_name FROM users WHERE id = $1', [buyerId]);
+      const buyerName = buyerResult.rows[0]?.full_name || 'A buyer';
+      
+      PushNotificationService.notifyPaymentReceived(
+        listing.seller_id,
+        total_price,
+        buyerName
+      ).catch(err => logger.error('Failed to send payment notification:', err));
 
       await client.query('COMMIT');
       return transaction;

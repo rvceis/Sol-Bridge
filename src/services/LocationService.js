@@ -3,10 +3,16 @@ const logger = require('../utils/logger');
 
 class LocationService {
   // Get nearby users (sellers, investors, hosters) within a radius
-  async getNearbyUsers(latitude, longitude, radiusKm = 50, userTypes = ['seller', 'investor', 'hoster']) {
+  async getNearbyUsers(latitude, longitude, radiusKm = 50, userTypes = ['seller'], limit = 50, sortBy = 'distance') {
     try {
       // Convert radius to degrees (approximate: 1 degree ≈ 111 km)
       const radiusDegrees = radiusKm / 111;
+
+      // Build ORDER BY clause
+      let orderClause = 'distance_km ASC';
+      if (sortBy === 'rating') {
+        orderClause = 'average_rating DESC, distance_km ASC';
+      }
 
       const result = await db.query(`
         SELECT 
@@ -16,8 +22,6 @@ class LocationService {
           u.role,
           u.kyc_status,
           u.created_at,
-          ua.latitude,
-          ua.longitude,
           ua.city,
           ua.state,
           ua.address_type,
@@ -58,9 +62,9 @@ class LocationService {
           AND ua.longitude IS NOT NULL
           AND ua.latitude BETWEEN $1 - $4 AND $1 + $4
           AND ua.longitude BETWEEN $2 - $4 AND $2 + $4
-        ORDER BY distance_km ASC
-        LIMIT 100
-      `, [latitude, longitude, userTypes, radiusDegrees]);
+        ORDER BY ${orderClause}
+        LIMIT $5
+      `, [latitude, longitude, userTypes, radiusDegrees, limit]);
 
       return result.rows;
     } catch (error) {
@@ -70,7 +74,7 @@ class LocationService {
   }
 
   // Get nearby listings with distance
-  async getNearbyListings(latitude, longitude, radiusKm = 50, filters = {}) {
+  async getNearbyListings(latitude, longitude, radiusKm = 50, filters = {}, sortBy = 'distance') {
     try {
       const radiusDegrees = radiusKm / 111;
       const {
@@ -88,12 +92,14 @@ class LocationService {
           l.*,
           u.full_name as seller_name,
           u.kyc_status as seller_kyc_status,
-          ua.latitude as seller_latitude,
-          ua.longitude as seller_longitude,
           ua.city as seller_city,
           ua.state as seller_state,
-          d.device_name,
+          (
+            SELECT COALESCE(AVG(rating), 0) FROM energy_transactions 
+            WHERE seller_id = u.id AND rating IS NOT NULL
+          ) as average_rating,
           d.device_type,
+          d.device_model,
           SQRT(
             POWER(COALESCE(l.location_latitude, ua.latitude) - $1, 2) + 
             POWER(COALESCE(l.location_longitude, ua.longitude) - $2, 2)
@@ -152,7 +158,15 @@ class LocationService {
         paramCount++;
       }
 
-      query += ` ORDER BY distance_km ASC LIMIT $${paramCount}`;
+      // Dynamic sorting
+      let orderClause = 'distance_km ASC';
+      if (sortBy === 'price') {
+        orderClause = 'l.price_per_kwh ASC, distance_km ASC';
+      } else if (sortBy === 'rating') {
+        orderClause = 'average_rating DESC, distance_km ASC';
+      }
+
+      query += ` ORDER BY ${orderClause} LIMIT $${paramCount}`;
       params.push(limit);
 
       const result = await db.query(query, params);

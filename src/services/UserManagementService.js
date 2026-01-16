@@ -8,7 +8,22 @@ const crypto = require('crypto');
 class UserManagementService {
   // User Registration
   async register(userData) {
-    const { email, password, role, full_name, phone, profile } = userData;
+    const { email, password, role, full_name, phone, profile: userProfile } = userData;
+
+    // Use empty profile if not provided
+    const profile = userProfile || {
+      address: '',
+      city: '',
+      state: '',
+      pincode: '',
+      household_size: 1,
+      solar_capacity_kw: 0,
+      has_battery: false,
+      has_ac: false,
+      has_ev: false,
+      risk_appetite: 'moderate',
+      min_roi_target: 12
+    };
 
     // Check if email already exists
     const existingUser = await db.query(
@@ -116,7 +131,7 @@ class UserManagementService {
       });
 
       // Fetch full profile to mirror login response shape
-      const profile = await this.getProfile(result.userId, role);
+      const fullProfile = await this.getProfile(result.userId, role);
 
       return {
         accessToken: tokens.accessToken,
@@ -126,7 +141,7 @@ class UserManagementService {
           id: result.userId,
           email: email.toLowerCase(),
           role,
-          ...profile,
+          ...fullProfile,
         },
         verificationToken: result.verificationToken,
       };

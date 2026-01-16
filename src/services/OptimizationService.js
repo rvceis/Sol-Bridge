@@ -411,70 +411,232 @@ class OptimizationService {
     try {
       const radiusDegrees = 50 / 111;
 
-      // Get historical transaction data
+      // Get historical transaction data (30 days)
       const historicalData = await db.query(`
         SELECT 
           DATE(t.created_at) as transaction_date,
           EXTRACT(DOW FROM t.created_at) as day_of_week,
+          EXTRACT(MONTH FROM t.created_at) as month,
           SUM(t.energy_amount_kwh) as total_energy,
           COUNT(*) as transaction_count,
-          AVG(t.price_per_kwh) as avg_price
+          AVG(t.price_per_kwh) as avg_price,
+          AVG(t.rating) as avg_rating
         FROM energy_transactions t
         JOIN energy_listings l ON t.listing_id = l.id
-        LEFT JOIN user_addresses ua ON l.seller_id = ua.user_id AND ua.is_primary = true
-        WHERE t.created_at > NOW() - INTERVAL '30 days'
+        LEFT JOIN user_addresses ua ON l.seller_id = ua.user_id AND ua.is_default = true
+        WHERE t.created_at > NOW() - INTERVAL '60 days'
           AND (ua.latitude BETWEEN $1 - $3 AND $1 + $3)
           AND (ua.longitude BETWEEN $2 - $3 AND $2 + $3)
-        GROUP BY DATE(t.created_at), EXTRACT(DOW FROM t.created_at)
+        GROUP BY DATE(t.created_at), EXTRACT(DOW FROM t.created_at), EXTRACT(MONTH FROM t.created_at)
         ORDER BY transaction_date
       `, [latitude, longitude, radiusDegrees]);
 
-      // Calculate averages by day of week
-      const dayOfWeekAvg = {};
+      if (historicalData.rows.length === 0) {
+        // Fallback if no data
+        return {
+          predictions: Array.from({ length: days }, (_, i) => ({
+            date: new Date(Date.now() + i * 86400000).toISOString().split('T')[0],
+            day_name: new Date(Date.now() + i * 86400000).toLocaleDateString('en-US', { weekday: 'long' }),
+            predicted_demand_kwh: 50,
+            predicted_transactions: 5,
+            predicted_avg_price: 6.0,
+            confidence: 'low',
+            trend: 'insufficient_data'
+          })),
+          model_info: {
+            based_on_days: 0,
+            data_points: 0,
+            methodology: 'Fallback baseline (insufficient historical data)',
+          }
+        };
+      }
+
+      // Calculate statistics by day of week
+      const dayOfWeekStats = {};
+      let totalEnergy = 0, totalTransactions = 0, totalPrice = 0, priceCount = 0;
+
       historicalData.rows.forEach(row => {
         const dow = parseInt(row.day_of_week);
-        if (!dayOfWeekAvg[dow]) {
-          dayOfWeekAvg[dow] = { energy: [], count: [], price: [] };
+        if (!dayOfWeekStats[dow]) {
+          dayOfWeekStats[dow] = { energy: [], count: [], price: [], ratings: [] };
         }
-        dayOfWeekAvg[dow].energy.push(parseFloat(row.total_energy));
-        dayOfWeekAvg[dow].count.push(parseInt(row.transaction_count));
-        dayOfWeekAvg[dow].price.push(parseFloat(row.avg_price));
+        dayOfWeekStats[dow].energy.push(parseFloat(row.total_energy) || 0);
+        dayOfWeekStats[dow].count.push(parseInt(row.transaction_count) || 0);
+        if (row.avg_price) {
+          dayOfWeekStats[dow].price.push(parseFloat(row.avg_price));
+          totalPrice += parseFloat(row.avg_price);
+          priceCount++;
+        }
+        if (row.avg_rating) {
+          dayOfWeekStats[dow].ratings.push(parseFloat(row.avg_rating));
+        }
+        totalEnergy += parseFloat(row.total_energy) || 0;
+        totalTransactions += parseInt(row.transaction_count) || 0;
       });
 
-      // Generate predictions
+      const overallAvgPrice = priceCount > 0 ? totalPrice / priceCount : 6.0;
+      const overallAvgEnergy = historicalData.rows.length > 0 ? totalEnergy / historicalData.rows.length : 50;
+
+      // Generate predictions with trend analysis
       const predictions = [];
       const today = new Date();
-      
+      let prevDemand = overallAvgEnergy;
+
       for (let i = 0; i < days; i++) {
         const date = new Date(today);
         date.setDate(date.getDate() + i);
         const dow = date.getDay();
+
+        const stats = dayOfWeekStats[dow] || { energy: [], count: [], price: [], ratings: [] };
         
-        const avgData = dayOfWeekAvg[dow] || { energy: [0], count: [0], price: [8] };
-        const avgEnergy = avgData.energy.reduce((a, b) => a + b, 0) / (avgData.energy.length || 1);
-        const avgCount = avgData.count.reduce((a, b) => a + b, 0) / (avgData.count.length || 1);
-        const avgPrice = avgData.price.reduce((a, b) => a + b, 0) / (avgData.price.length || 1);
+        // Calculate averages
+        const avgEnergy = stats.energy.length > 0 
+          ? stats.energy.reduce((a, b) => a + b, 0) / stats.energy.length 
+          : overallAvgEnergy;
+        const avgCount = stats.count.length > 0 
+          ? Math.ceil(stats.count.reduce((a, b) => a + b, 0) / stats.count.length) 
+          : 5;
+        const avgPrice = stats.price.length > 0 
+          ? stats.price.reduce((a, b) => a + b, 0) / stats.price.length 
+          : overallAvgPrice;
+
+        // Calculate trend (simple: compare to previous day)
+        let trend = 'stable';
+        if (avgEnergy > prevDemand * 1.15) trend = 'increasing';
+        else if (avgEnergy < prevDemand * 0.85) trend = 'decreasing';
+
+        // Confidence based on data samples
+        let confidence = 'low';
+        if (stats.energy.length >= 6) confidence = 'high';
+        else if (stats.energy.length >= 3) confidence = 'medium';
 
         predictions.push({
           date: date.toISOString().split('T')[0],
           day_name: date.toLocaleDateString('en-US', { weekday: 'long' }),
           predicted_demand_kwh: Math.round(avgEnergy * 100) / 100,
-          predicted_transactions: Math.round(avgCount),
+          predicted_transactions: avgCount,
           predicted_avg_price: Math.round(avgPrice * 100) / 100,
-          confidence: avgData.energy.length >= 4 ? 'high' : avgData.energy.length >= 2 ? 'medium' : 'low',
+          confidence,
+          trend,
+          data_samples: stats.energy.length
         });
+
+        prevDemand = avgEnergy;
       }
 
       return {
         predictions,
         model_info: {
-          based_on_days: 30,
+          based_on_days: 60,
           data_points: historicalData.rows.length,
-          methodology: 'Day-of-week averaging with historical data',
+          methodology: 'Day-of-week statistical averaging with trend analysis',
+          overall_avg_demand_kwh: Math.round(overallAvgEnergy * 100) / 100,
+          overall_avg_price: Math.round(overallAvgPrice * 100) / 100,
         }
       };
     } catch (error) {
       logger.error('Error in predictDemand:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get seller reliability metrics
+   * Calculates: completion rate, response time, avg rating
+   */
+  async getSellerReliability(sellerId) {
+    try {
+      const result = await db.query(`
+        SELECT
+          COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+          COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled,
+          COUNT(CASE WHEN status = 'disputed' THEN 1 END) as disputed,
+          COUNT(*) as total_transactions,
+          COALESCE(AVG(rating), 0) as avg_rating,
+          COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600), 0) as avg_completion_hours,
+          MIN(created_at) as seller_since
+        FROM energy_transactions
+        WHERE seller_id = $1
+      `, [sellerId]);
+
+      const data = result.rows[0];
+      const completionRate = data.total_transactions > 0 
+        ? (data.completed / data.total_transactions) * 100 
+        : 0;
+      const cancellationRate = data.total_transactions > 0 
+        ? (data.cancelled / data.total_transactions) * 100 
+        : 0;
+
+      // Reliability score: 0-100
+      let reliabilityScore = 0;
+      reliabilityScore += completionRate * 0.6; // 60% weight on completion
+      reliabilityScore += (100 - cancellationRate * 5) * 0.2; // 20% weight on low cancellation
+      reliabilityScore += (data.avg_rating / 5) * 100 * 0.2; // 20% weight on rating
+
+      return {
+        reliability_score: Math.round(reliabilityScore * 100) / 100,
+        completion_rate: Math.round(completionRate * 100) / 100,
+        cancellation_rate: Math.round(cancellationRate * 100) / 100,
+        dispute_rate: data.total_transactions > 0 ? Math.round((data.disputed / data.total_transactions) * 100 * 100) / 100 : 0,
+        avg_rating: Math.round(data.avg_rating * 100) / 100,
+        avg_completion_hours: Math.round(data.avg_completion_hours * 10) / 10,
+        total_transactions: data.total_transactions,
+        seller_since: data.seller_since
+      };
+    } catch (error) {
+      logger.error('Error in getSellerReliability:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get demand clustering by location
+   * Identifies hotspots of high demand
+   */
+  async getLocationDemandClusters(limit = 10) {
+    try {
+      const result = await db.query(`
+        SELECT
+          ROUND(ua.latitude::numeric, 1) as lat_cluster,
+          ROUND(ua.longitude::numeric, 1) as lng_cluster,
+          ua.city,
+          ua.state,
+          COUNT(t.id) as transaction_count,
+          SUM(t.energy_amount_kwh) as total_energy_kwh,
+          AVG(t.price_per_kwh) as avg_price,
+          COUNT(DISTINCT t.buyer_id) as unique_buyers,
+          COUNT(DISTINCT t.seller_id) as unique_sellers
+        FROM energy_transactions t
+        JOIN energy_listings l ON t.listing_id = l.id
+        JOIN users u ON l.seller_id = u.id
+        JOIN user_addresses ua ON u.id = ua.user_id AND ua.is_default = true
+        WHERE t.created_at > NOW() - INTERVAL '30 days'
+          AND ua.latitude IS NOT NULL
+          AND ua.longitude IS NOT NULL
+        GROUP BY ROUND(ua.latitude::numeric, 1), ROUND(ua.longitude::numeric, 1), ua.city, ua.state
+        ORDER BY transaction_count DESC
+        LIMIT $1
+      `, [limit]);
+
+      return result.rows.map(row => ({
+        location: {
+          city: row.city,
+          state: row.state,
+          approximate_lat: row.lat_cluster,
+          approximate_lng: row.lng_cluster
+        },
+        metrics: {
+          transaction_count: row.transaction_count,
+          total_energy_kwh: Math.round(row.total_energy_kwh * 100) / 100,
+          avg_price_per_kwh: Math.round(row.avg_price * 100) / 100,
+          unique_buyers: row.unique_buyers,
+          unique_sellers: row.unique_sellers,
+          buyer_seller_ratio: (row.unique_buyers / row.unique_sellers).toFixed(2)
+        },
+        demand_level: row.transaction_count >= 20 ? 'very_high' : row.transaction_count >= 10 ? 'high' : row.transaction_count >= 5 ? 'medium' : 'low'
+      }));
+    } catch (error) {
+      logger.error('Error in getLocationDemandClusters:', error);
       throw error;
     }
   }

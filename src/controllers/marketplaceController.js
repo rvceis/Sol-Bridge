@@ -1,4 +1,5 @@
 const MarketplaceService = require('../services/MarketplaceService');
+const LocationService = require('../services/LocationService');
 const logger = require('../utils/logger');
 
 class MarketplaceController {
@@ -247,6 +248,97 @@ class MarketplaceController {
       res.status(500).json({
         success: false,
         error: error.message || 'Failed to get market statistics'
+      });
+    }
+  }
+
+  // Get nearby listings
+  async getNearbyListings(req, res) {
+    try {
+      const { latitude, longitude, radius, sort, limit } = req.query;
+      
+      if (!latitude || !longitude) {
+        return res.status(400).json({
+          success: false,
+          error: 'Latitude and longitude are required'
+        });
+      }
+
+      // Validate coordinates
+      const lat = parseFloat(latitude);
+      const lng = parseFloat(longitude);
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid latitude/longitude'
+        });
+      }
+
+      const filters = {
+        min_price: req.query.min_price,
+        max_price: req.query.max_price,
+        min_energy: req.query.min_energy,
+        max_energy: req.query.max_energy,
+        listing_type: req.query.listing_type,
+        renewable_only: req.query.renewable_only === 'true',
+        limit: parseInt(limit) || 50
+      };
+
+      // Enforce limits
+      const MAX_RADIUS = 200;
+      const MAX_LIMIT = 100;
+      let radiusKm = parseInt(radius) || 50;
+      
+      if (radiusKm > MAX_RADIUS) radiusKm = MAX_RADIUS;
+      if (radiusKm < 1) radiusKm = 1;
+      if (filters.limit > MAX_LIMIT) filters.limit = MAX_LIMIT;
+
+      const sortBy = sort && ['distance', 'price', 'rating'].includes(sort) ? sort : 'distance';
+      
+      // LocationService is exported as an instance, use directly
+      const listings = await LocationService.getNearbyListings(
+        lat,
+        lng,
+        radiusKm,
+        filters,
+        sortBy
+      );
+
+      // Privacy: hide seller's exact coordinates, expose only city/distance
+      const privacyShapedListings = listings.map(listing => ({
+        id: listing.id,
+        seller_id: listing.seller_id,
+        seller_name: listing.seller_name,
+        seller_city: listing.seller_city,
+        seller_state: listing.seller_state,
+        seller_kyc_status: listing.seller_kyc_status,
+        seller_rating: listing.average_rating,
+        device_type: listing.device_type,
+        energy_amount_kwh: Math.round(listing.energy_amount_kwh * 100) / 100,
+        price_per_kwh: Math.round(listing.price_per_kwh * 100) / 100,
+        available_from: listing.available_from,
+        available_to: listing.available_to,
+        listing_type: listing.listing_type,
+        renewable_cert: listing.renewable_cert,
+        distance_km: Math.round(listing.distance_km * 10) / 10,
+        min_purchase_kwh: listing.min_purchase_kwh
+      }));
+      
+      res.json({
+        success: true,
+        data: privacyShapedListings,
+        count: privacyShapedListings.length,
+        metadata: {
+          search_radius_km: radiusKm,
+          max_radius_km: MAX_RADIUS,
+          sorted_by: sortBy
+        }
+      });
+    } catch (error) {
+      logger.error('Error in getNearbyListings:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to get nearby listings'
       });
     }
   }

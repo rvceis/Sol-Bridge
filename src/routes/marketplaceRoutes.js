@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 
 // Public routes (anyone can view listings)
 router.get('/listings', MarketplaceController.getListings);
+router.get('/nearby-listings', MarketplaceController.getNearbyListings);
 router.get('/listings/:id', MarketplaceController.getListingById);
 router.get('/statistics', MarketplaceController.getMarketStatistics);
 

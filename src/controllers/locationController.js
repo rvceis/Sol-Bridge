@@ -3,11 +3,12 @@ const OptimizationService = require('../services/OptimizationService');
 const logger = require('../utils/logger');
 
 class LocationController {
-  // Get nearby users (sellers, investors, hosters)
+  // Get nearby users (sellers, investors, hosters) within a radius
   async getNearbyUsers(req, res) {
     try {
-      const { latitude, longitude, radius, types } = req.query;
+      const { latitude, longitude, radius, types, sort, limit } = req.query;
 
+      // Validate location
       if (!latitude || !longitude) {
         return res.status(400).json({
           success: false,
@@ -15,21 +16,72 @@ class LocationController {
         });
       }
 
-      const userTypes = types ? types.split(',') : ['seller', 'investor', 'hoster'];
-      const radiusKm = parseInt(radius) || 50;
+      const lat = parseFloat(latitude);
+      const lng = parseFloat(longitude);
+
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid latitude/longitude. Lat: [-90, 90], Lng: [-180, 180]'
+        });
+      }
+
+      // Validate and enforce limits
+      let radiusKm = parseInt(radius) || 50;
+      const MAX_RADIUS = 200;
+      const MAX_LIMIT = 100;
+      
+      if (radiusKm > MAX_RADIUS) {
+        radiusKm = MAX_RADIUS;
+      }
+      if (radiusKm < 1) {
+        radiusKm = 1;
+      }
+
+      let limitValue = parseInt(limit) || 50;
+      if (limitValue > MAX_LIMIT) {
+        limitValue = MAX_LIMIT;
+      }
+
+      const userTypes = types ? types.split(',').filter(t => ['seller', 'investor', 'hoster'].includes(t)) : ['seller'];
+      const sortBy = sort && ['distance', 'rating'].includes(sort) ? sort : 'distance';
 
       const users = await LocationService.getNearbyUsers(
-        parseFloat(latitude),
-        parseFloat(longitude),
+        lat,
+        lng,
         radiusKm,
-        userTypes
+        userTypes,
+        limitValue,
+        sortBy
       );
+
+      // Privacy: hide exact coordinates, expose only city/distance
+      const privacyShapedUsers = users.map(user => ({
+        id: user.id,
+        name: user.full_name,
+        role: user.role,
+        kyc_status: user.kyc_status,
+        city: user.city,
+        state: user.state,
+        distance_km: Math.round(user.distance_km * 10) / 10,
+        active_listings: user.active_listings,
+        available_energy_kwh: Math.round(user.available_energy_kwh * 100) / 100,
+        device_count: user.device_count,
+        average_rating: Math.round(user.average_rating * 10) / 10,
+        completed_transactions: user.completed_transactions,
+        joined_date: user.created_at
+      }));
 
       res.json({
         success: true,
-        data: users,
-        count: users.length,
-        query: { latitude, longitude, radius: radiusKm, types: userTypes }
+        data: privacyShapedUsers,
+        count: privacyShapedUsers.length,
+        metadata: {
+          search_radius_km: radiusKm,
+          max_radius_km: MAX_RADIUS,
+          sorted_by: sortBy,
+          user_types: userTypes
+        }
       });
     } catch (error) {
       logger.error('Error in getNearbyUsers:', error);
@@ -298,6 +350,64 @@ class LocationController {
       res.status(500).json({
         success: false,
         error: error.message || 'Failed to get demand prediction'
+      });
+    }
+  }
+
+  // Get seller reliability score
+  async getSellerReliability(req, res) {
+    try {
+      const { sellerId } = req.params;
+
+      if (!sellerId || isNaN(parseInt(sellerId))) {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid seller ID is required'
+        });
+      }
+
+      const reliability = await OptimizationService.getSellerReliability(parseInt(sellerId));
+
+      res.json({
+        success: true,
+        data: reliability
+      });
+    } catch (error) {
+      logger.error('Error in getSellerReliability:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to get seller reliability'
+      });
+    }
+  }
+
+  // Get location demand clusters
+  async getDemandClusters(req, res) {
+    try {
+      const { limit } = req.query;
+      let limitValue = parseInt(limit) || 10;
+      
+      // Enforce max clusters limit
+      if (limitValue > 100) {
+        limitValue = 100;
+      }
+      if (limitValue < 1) {
+        limitValue = 1;
+      }
+
+      const clusters = await OptimizationService.getLocationDemandClusters(limitValue);
+
+      res.json({
+        success: true,
+        data: clusters,
+        count: clusters.length,
+        limit: limitValue
+      });
+    } catch (error) {
+      logger.error('Error in getDemandClusters:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to get demand clusters'
       });
     }
   }
