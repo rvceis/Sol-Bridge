@@ -589,6 +589,64 @@ const createSchema = async () => {
 
     await db.query('CREATE INDEX IF NOT EXISTS idx_market_statistics_date ON market_statistics(stat_date DESC)');
 
+    // ===== panel_predictions table (for solar panel output forecasts) =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS panel_predictions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        device_id VARCHAR(100) NOT NULL,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        predicted_date TIMESTAMP NOT NULL,
+        predicted_value DECIMAL(10, 4) NOT NULL,
+        actual_value DECIMAL(10, 4),
+        confidence DECIMAL(5, 4) DEFAULT 0.75,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(device_id, predicted_date)
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_panel_predictions_device ON panel_predictions(device_id, predicted_date DESC)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_panel_predictions_user ON panel_predictions(user_id, predicted_date DESC)');
+
+    // ===== consumption_predictions table (for user consumption forecasts) =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS consumption_predictions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        predicted_date TIMESTAMP NOT NULL,
+        predicted_value DECIMAL(10, 4) NOT NULL,
+        actual_value DECIMAL(10, 4),
+        hourly_breakdown JSONB DEFAULT '{}',
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, predicted_date)
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_consumption_predictions_user ON consumption_predictions(user_id, predicted_date DESC)');
+
+    // ===== anomaly_alerts table (for system anomaly detection) =====
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS anomaly_alerts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        device_id VARCHAR(100),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        alert_type VARCHAR(50) NOT NULL,
+        severity VARCHAR(20) DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+        description TEXT,
+        detected_at TIMESTAMPTZ DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ,
+        resolution_notes TEXT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await db.query('CREATE INDEX IF NOT EXISTS idx_anomaly_alerts_user ON anomaly_alerts(user_id, detected_at DESC)');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_anomaly_alerts_severity ON anomaly_alerts(severity, resolved_at)');
+
     logger.info('Database schema created successfully');
     return true;
   } catch (error) {
