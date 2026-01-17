@@ -31,6 +31,7 @@ const predictionRoutes = require('./routes/predictionRoutes');
 
 // Services
 const iotService = require('./services/IoTDataService');
+const iotManager = require('./services/iotManager');
 
 const app = express();
 
@@ -122,7 +123,15 @@ const startServer = async () => {
     // Initialize database schema
     await createSchema();
 
-    // Initialize IoT Service (MQTT connection)
+    // Initialize IoT Manager (MQTT connection for device data)
+    try {
+      await iotManager.initMQTT();
+      logger.info('✓ IoT Manager initialized with MQTT');
+    } catch (error) {
+      logger.warn('⚠ IoT Manager MQTT initialization failed, continuing without real-time updates:', error.message);
+    }
+
+    // Initialize IoT Service (legacy, if needed)
     try {
       await iotService.initialize();
       logger.info('IoT Service initialized successfully');
@@ -148,6 +157,12 @@ const startServer = async () => {
           await iotService.close();
         } catch (err) {
           logger.warn('Error closing IoT service:', err);
+        }
+
+        try {
+          iotManager.flush().then(() => iotManager.disconnect());
+        } catch (err) {
+          logger.warn('Error closing IoT manager:', err);
         }
 
         await db.closePool();

@@ -1,23 +1,144 @@
 const express = require('express');
 const router = express.Router();
-const iotController = require('../controllers/iotController');
-const { authenticate } = require('../middleware/auth');
+const iotManager = require('../services/iotManager');
+const logger = require('../utils/logger');
 
-// Public endpoint for IoT devices (would need device auth)
-router.post('/iot/ingest', iotController.ingestData);
+/**
+ * POST /api/iot/devices - Register new device
+ */
+router.post('/devices', async (req, res) => {
+  try {
+    const { device_id, name, location_id, capacity_kw } = req.body;
 
-// Protected endpoints - get userId from authenticated user
-router.get('/iot/latest', authenticate, iotController.getLatestReading);
-router.get('/iot/history', authenticate, iotController.getReadingHistory);
+    if (!device_id) {
+      return res.status(400).json({ error: 'device_id required' });
+    }
 
-// Device Management endpoints
-router.post('/iot/devices', authenticate, iotController.registerDevice);
-router.get('/iot/devices', authenticate, iotController.getDevices);
-router.get('/iot/devices/:deviceId', authenticate, iotController.getDevice);
-router.put('/iot/devices/:deviceId', authenticate, iotController.updateDevice);
-router.delete('/iot/devices/:deviceId', authenticate, iotController.deleteDevice);
+    const device = iotManager.registerDevice({
+      device_id,
+      name,
+      location_id,
+      capacity_kw,
+    });
 
-// Device command endpoint
-router.post('/iot/devices/:deviceId/command', authenticate, iotController.sendCommand);
+    res.status(201).json({
+      success: true,
+      device,
+      mqtt_topic: `solar/${device_id}/data`,
+    });
+  } catch (err) {
+    logger.error('Device registration error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/iot/devices - List all devices
+ */
+router.get('/devices', (req, res) => {
+  try {
+    const devices = iotManager.getAllDevices();
+    res.json({
+      count: devices.length,
+      devices,
+    });
+  } catch (err) {
+    logger.error('List devices error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/iot/devices/:deviceId - Get device details
+ */
+router.get('/devices/:deviceId', (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const device = iotManager.getDevice(deviceId);
+
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    res.json(device);
+  } catch (err) {
+    logger.error('Get device error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/iot/devices/:deviceId/forecast - Get latest forecast
+ */
+router.get('/devices/:deviceId/forecast', (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const forecast = iotManager.getDeviceForecast(deviceId);
+
+    if (!forecast) {
+      return res.status(404).json({ error: 'No forecast available' });
+    }
+
+    res.json({
+      device_id: deviceId,
+      forecast,
+    });
+  } catch (err) {
+    logger.error('Get forecast error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/iot/devices/:deviceId/command - Send command to device
+ */
+router.post('/devices/:deviceId/command', (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { command } = req.body;
+
+    if (!command) {
+      return res.status(400).json({ error: 'command required' });
+    }
+
+    const device = iotManager.getDevice(deviceId);
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    const success = iotManager.sendCommand(deviceId, command);
+
+    res.json({
+      success,
+      device_id: deviceId,
+      command,
+      timestamp: new Date(),
+    });
+  } catch (err) {
+    logger.error('Send command error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/iot/health - IoT service health check
+ */
+router.get('/health', (req, res) => {
+  try {
+    const devices = iotManager.getAllDevices();
+    const onlineCount = devices.filter((d) => d.status === 'online').length;
+
+    res.json({
+      status: 'ok',
+      mqtt_connected: iotManager.mqttClient?.connected || false,
+      total_devices: devices.length,
+      online_devices: onlineCount,
+      timestamp: new Date(),
+    });
+  } catch (err) {
+    logger.error('Health check error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;
