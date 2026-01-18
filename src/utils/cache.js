@@ -10,20 +10,20 @@ try {
   
   redis.on('connect', () => {
     redisAvailable = true;
-    logger.info('Redis connected');
+    logger.debug('Redis connected');
   });
   
   redis.on('error', (err) => {
     redisAvailable = false;
-    logger.warn('Redis error (caching disabled):', err.message);
+    logger.debug('Redis error (caching disabled):', err.message);
   });
   
   redis.on('close', () => {
     redisAvailable = false;
-    logger.info('Redis connection closed');
+    logger.debug('Redis connection closed');
   });
 } catch (err) {
-  logger.warn('Redis initialization failed, caching disabled:', err.message);
+  logger.debug('Redis initialization failed, caching disabled:', err.message);
   redisAvailable = false;
 }
 

@@ -23,7 +23,7 @@ class IoTManager {
    */
   async initMQTT() {
     return new Promise((resolve, reject) => {
-      logger.info(`Connecting to MQTT: ${MQTT_URL}`);
+      logger.debug(`Connecting to MQTT: ${MQTT_URL}`);
       
       this.mqttClient = mqtt.connect(MQTT_URL, {
         clientId: `solar-backend-${Date.now()}`,
@@ -32,24 +32,24 @@ class IoTManager {
       });
 
       this.mqttClient.on('connect', () => {
-        logger.info('✓ MQTT Connected');
+        logger.debug('✓ MQTT Connected');
         
         // Subscribe to device topics
         this.mqttClient.subscribe('solar/+/data', (err) => {
-          if (err) logger.error('Subscribe error:', err);
-          else logger.info('✓ Subscribed to solar/+/data');
+          if (err) logger.debug('Subscribe error:', err);
+          else logger.debug('✓ Subscribed to solar/+/data');
         });
 
         this.mqttClient.subscribe('solar/+/status', (err) => {
-          if (err) logger.error('Subscribe error:', err);
-          else logger.info('✓ Subscribed to solar/+/status');
+          if (err) logger.debug('Subscribe error:', err);
+          else logger.debug('✓ Subscribed to solar/+/status');
         });
 
         resolve();
       });
 
       this.mqttClient.on('error', (err) => {
-        logger.error('MQTT error:', err);
+        logger.debug('MQTT error:', err);
         reject(err);
       });
 
@@ -58,7 +58,7 @@ class IoTManager {
       });
 
       this.mqttClient.on('disconnect', () => {
-        logger.warn('⚠ MQTT Disconnected');
+        logger.debug('⚠ MQTT Disconnected');
       });
     });
   }
