@@ -114,8 +114,8 @@ const createSchema = async () => {
       CREATE TABLE IF NOT EXISTS investors (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-        total_capital DECIMAL(12, 2) NOT NULL CHECK (total_capital > 0),
-        available_capital DECIMAL(12, 2) NOT NULL CHECK (available_capital >= 0),
+        total_capital DECIMAL(12, 2) NOT NULL DEFAULT 0 CHECK (total_capital >= 0),
+        available_capital DECIMAL(12, 2) NOT NULL DEFAULT 0 CHECK (available_capital >= 0),
         invested_capital DECIMAL(12, 2) GENERATED ALWAYS AS (total_capital - available_capital) STORED,
         risk_appetite VARCHAR(20) CHECK (risk_appetite IN ('low', 'medium', 'high')),
         min_roi_target DECIMAL(5, 2),

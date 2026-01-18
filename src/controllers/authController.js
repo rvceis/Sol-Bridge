@@ -2,6 +2,7 @@ const userService = require('../services/UserManagementService');
 const { asyncHandler } = require('../utils/errors');
 const { schemas, validate } = require('../utils/validation');
 const logger = require('../utils/logger');
+const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 
 // Register
 const register = asyncHandler(async (req, res) => {
@@ -12,10 +13,15 @@ const register = asyncHandler(async (req, res) => {
   res.success(result, 'User registered successfully', 201);
 });
 
-// Login
+// Login (cache session)
 const login = asyncHandler(async (req, res) => {
   const data = validate(req.body, schemas.login);
   const result = await userService.login(data.email, data.password);
+
+  // Cache user session for quick auth validation (1 hour TTL)
+  if (result.user) {
+    await cacheSet(`session:${result.user.id}`, result.user, 3600);
+  }
 
   logger.info({ action: 'user_login', email: data.email });
   res.success(result, 'Login successful');
@@ -61,17 +67,37 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   res.success(result, 'Token refreshed successfully');
 });
 
-// Get Profile
+// Get Profile (with caching)
 const getProfile = asyncHandler(async (req, res) => {
-  const result = await userService.getProfile(req.user.id);
-  logger.info({ action: 'profile_fetched', userId: req.user.id });
+  const userId = req.user.id;
+  const cacheKey = `profile:${userId}`;
+  
+  // Try cache first (5 minute TTL)
+  const cached = await cacheGet(cacheKey);
+  if (cached) {
+    logger.debug(`Returning profile for user ${userId} from cache`);
+    return res.success(cached, 'Profile fetched successfully');
+  }
+  
+  const result = await userService.getProfile(userId);
+  
+  // Cache profile
+  await cacheSet(cacheKey, result, 300); // 5 minutes
+  
+  logger.info({ action: 'profile_fetched', userId });
   res.success(result, 'Profile fetched successfully');
 });
 
-// Update Profile
+// Update Profile (invalidate cache)
 const updateProfile = asyncHandler(async (req, res) => {
-  const result = await userService.updateProfile(req.user.id, req.body);
-  logger.info({ action: 'profile_updated', userId: req.user.id, updates: Object.keys(req.body) });
+  const userId = req.user.id;
+  const result = await userService.updateProfile(userId, req.body);
+  
+  // Invalidate cache
+  await cacheDel(`profile:${userId}`);
+  await cacheDel(`session:${userId}`);
+  
+  logger.info({ action: 'profile_updated', userId, updates: Object.keys(req.body) });
   res.success(result, 'Profile updated successfully');
 });
 

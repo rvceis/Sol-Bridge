@@ -1,9 +1,10 @@
 const LocationService = require('../services/LocationService');
 const OptimizationService = require('../services/OptimizationService');
 const logger = require('../utils/logger');
+const { cacheGet, cacheSet } = require('../utils/cache');
 
 class LocationController {
-  // Get nearby users (sellers, investors, hosters) within a radius
+  // Get nearby users (sellers, investors, hosters) within a radius (with Redis caching)
   async getNearbyUsers(req, res) {
     try {
       const { latitude, longitude, radius, types, sort, limit } = req.query;
@@ -46,6 +47,24 @@ class LocationController {
       const userTypes = types ? types.split(',').filter(t => ['seller', 'investor', 'hoster'].includes(t)) : ['seller'];
       const sortBy = sort && ['distance', 'rating'].includes(sort) ? sort : 'distance';
 
+      // Create cache key (rounded coordinates for cache hits)
+      const roundedLat = Math.round(lat * 100) / 100;
+      const roundedLng = Math.round(lng * 100) / 100;
+      const cacheKey = `location:nearby:${roundedLat},${roundedLng}:${radiusKm}:${userTypes.join(',')}:${sortBy}`;
+      
+      // Try cache (2 minute TTL for location data)
+      const cached = await cacheGet(cacheKey);
+      if (cached) {
+        logger.debug('Returning nearby users from cache');
+        return res.json({
+          success: true,
+          data: cached.users,
+          count: cached.users.length,
+          metadata: cached.metadata,
+          cached: true
+        });
+      }
+
       const users = await LocationService.getNearbyUsers(
         lat,
         lng,
@@ -71,17 +90,22 @@ class LocationController {
         completed_transactions: user.completed_transactions,
         joined_date: user.created_at
       }));
+      
+      const metadata = {
+        search_radius_km: radiusKm,
+        max_radius_km: MAX_RADIUS,
+        sorted_by: sortBy,
+        user_types: userTypes
+      };
+      
+      // Cache the result (2 minutes - location data changes frequently)
+      await cacheSet(cacheKey, { users: privacyShapedUsers, metadata }, 120);
 
       res.json({
         success: true,
         data: privacyShapedUsers,
         count: privacyShapedUsers.length,
-        metadata: {
-          search_radius_km: radiusKm,
-          max_radius_km: MAX_RADIUS,
-          sorted_by: sortBy,
-          user_types: userTypes
-        }
+        metadata
       });
     } catch (error) {
       logger.error('Error in getNearbyUsers:', error);
@@ -92,7 +116,7 @@ class LocationController {
     }
   }
 
-  // Get nearby listings
+  // Get nearby listings (with Redis caching)
   async getNearbyListings(req, res) {
     try {
       const { latitude, longitude, radius, min_price, max_price, min_energy, max_energy, renewable_only, listing_type, limit } = req.query;

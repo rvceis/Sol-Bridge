@@ -1,6 +1,7 @@
 const MarketplaceService = require('../services/MarketplaceService');
 const LocationService = require('../services/LocationService');
 const logger = require('../utils/logger');
+const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 
 class MarketplaceController {
   // Create listing
@@ -10,6 +11,10 @@ class MarketplaceController {
       const listingData = req.body;
       
       const listing = await MarketplaceService.createListing(userId, listingData);
+      
+      // Invalidate cache when new listing is created
+      await cacheDel(`listings:all`);
+      await cacheDel(`listings:user:${userId}`);
       
       res.status(201).json({
         success: true,
@@ -25,7 +30,7 @@ class MarketplaceController {
     }
   }
 
-  // Get all listings
+  // Get all listings (with Redis caching)
   async getListings(req, res) {
     try {
       const filters = {
@@ -40,7 +45,25 @@ class MarketplaceController {
         offset: parseInt(req.query.offset) || 0
       };
       
+      // Create cache key based on filters
+      const cacheKey = `listings:${JSON.stringify(filters)}`;
+      
+      // Try to get from cache (5 minute TTL for listings)
+      const cached = await cacheGet(cacheKey);
+      if (cached) {
+        logger.debug('Returning listings from cache');
+        return res.json({
+          success: true,
+          data: cached,
+          count: cached.length,
+          cached: true
+        });
+      }
+      
       const listings = await MarketplaceService.getListings(filters);
+      
+      // Cache the results
+      await cacheSet(cacheKey, listings, 300); // 5 minutes
       
       res.json({
         success: true,
@@ -56,11 +79,27 @@ class MarketplaceController {
     }
   }
 
-  // Get listing by ID
+  // Get listing by ID (with Redis caching)
   async getListingById(req, res) {
     try {
       const { id } = req.params;
+      const cacheKey = `listing:${id}`;
+      
+      // Try cache first (10 minute TTL for individual listings)
+      const cached = await cacheGet(cacheKey);
+      if (cached) {
+        logger.debug(`Returning listing ${id} from cache`);
+        return res.json({
+          success: true,
+          data: cached,
+          cached: true
+        });
+      }
+      
       const listing = await MarketplaceService.getListingById(id);
+      
+      // Cache the result
+      await cacheSet(cacheKey, listing, 600); // 10 minutes
       
       res.json({
         success: true,
@@ -83,6 +122,11 @@ class MarketplaceController {
       const updates = req.body;
       
       const listing = await MarketplaceService.updateListing(userId, id, updates);
+      
+      // Invalidate caches
+      await cacheDel(`listing:${id}`);
+      await cacheDel(`listings:all`);
+      await cacheDel(`listings:user:${userId}`);
       
       res.json({
         success: true,

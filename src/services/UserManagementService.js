@@ -91,13 +91,15 @@ class UserManagementService {
             ]
           );
         } else if (role === 'investor') {
+          // Default initial capital is 0 (user will add funds later)
+          const initialCapital = profile.total_capital || 0;
           await client.query(
             `INSERT INTO investors (user_id, total_capital, available_capital, risk_appetite, min_roi_target)
              VALUES ($1, $2, $3, $4, $5)`,
             [
               userId,
-              profile.total_capital,
-              profile.total_capital,
+              initialCapital,
+              initialCapital,
               profile.risk_appetite || 'medium',
               profile.min_roi_target || 12,
             ]

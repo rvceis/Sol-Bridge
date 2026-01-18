@@ -1,6 +1,7 @@
 const iotService = require('../services/IoTDataService');
 const { asyncHandler } = require('../utils/errors');
 const { schemas, validate } = require('../utils/validation');
+const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 
 // Ingest IoT data
 const ingestData = asyncHandler(async (req, res) => {
@@ -9,6 +10,9 @@ const ingestData = asyncHandler(async (req, res) => {
     `energy/${data.user_id}/device/reading`,
     Buffer.from(JSON.stringify(data))
   );
+  
+  // Invalidate user's reading cache when new data arrives
+  await cacheDel(`iot:latest:${data.user_id}`);
 
   res.json({
     status: 'accepted',
@@ -16,30 +20,52 @@ const ingestData = asyncHandler(async (req, res) => {
   });
 });
 
-// Get latest reading - uses authenticated user's ID
+// Get latest reading - uses authenticated user's ID (with Redis caching)
 const getLatestReading = asyncHandler(async (req, res) => {
-  const userId = req.user.id; // Get from authenticated user
+  const userId = req.user.id;
+  const cacheKey = `iot:latest:${userId}`;
+  
+  // Try cache first (30 second TTL for real-time data)
+  const cached = await cacheGet(cacheKey);
+  if (cached) {
+    return res.json({
+      success: true,
+      data: cached,
+      cached: true
+    });
+  }
+  
   const reading = await iotService.getLatestReading(userId);
 
   if (!reading) {
+    const response = {
+      reading: null,
+      device: null,
+      lastUpdated: new Date().toISOString(),
+      message: 'No readings found. Connect a solar device to start tracking.',
+    };
+    
+    // Cache "no data" response for 60 seconds
+    await cacheSet(cacheKey, response, 60);
+    
     return res.json({
       success: true,
-      data: {
-        reading: null,
-        device: null,
-        lastUpdated: new Date().toISOString(),
-        message: 'No readings found. Connect a solar device to start tracking.',
-      },
+      data: response,
     });
   }
 
+  const response = {
+    reading,
+    device: reading.device || null,
+    lastUpdated: reading.timestamp || new Date().toISOString(),
+  };
+  
+  // Cache reading for 30 seconds (real-time data shouldn't be cached too long)
+  await cacheSet(cacheKey, response, 30);
+  
   res.json({
     success: true,
-    data: {
-      reading,
-      device: reading.device || null,
-      lastUpdated: reading.timestamp || new Date().toISOString(),
-    },
+    data: response,
   });
 });
 

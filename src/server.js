@@ -73,11 +73,20 @@ if (redisAvailable()) {
 }
 
 // ===== Health Check =====
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+  const dbStatus = db ? 'connected' : 'disconnected';
+  const redisStatus = redisAvailable() ? 'connected' : 'disconnected';
+  
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    services: {
+      database: dbStatus,
+      redis: redisStatus,
+      iot: iotManager ? 'running' : 'stopped',
+    },
+    version: config.apiVersion,
   });
 });
 
