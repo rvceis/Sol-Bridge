@@ -11,6 +11,7 @@ const { errorHandler, responseMiddleware } = require('./utils/response');
 const { authenticate, createRateLimiter, corsOptions } = require('./middleware/auth');
 const db = require('./database');
 const { createSchema } = require('./database/schema');
+const { runMigrations } = require('./database/migrations');
 const { redis, redisAvailable } = require('./utils/cache');
 
 // Routes
@@ -132,7 +133,8 @@ const startServer = async () => {
     // Initialize database schema
     await createSchema();
 
-    // Initialize IoT Manager (MQTT connection for device data)
+    // Run migrations for constraint updates and other schema changes
+    await runMigrations();
     try {
       await iotManager.initMQTT();
       logger.info('✓ IoT Manager initialized with MQTT');
