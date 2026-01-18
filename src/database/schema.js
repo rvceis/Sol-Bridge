@@ -51,7 +51,7 @@ const createSchema = async () => {
       CREATE TABLE IF NOT EXISTS hosts (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-        solar_capacity_kw DECIMAL(10, 2) NOT NULL CHECK (solar_capacity_kw > 0),
+        solar_capacity_kw DECIMAL(10, 2) NOT NULL DEFAULT 0 CHECK (solar_capacity_kw >= 0),
         panel_brand VARCHAR(100),
         panel_model VARCHAR(100),
         installation_date DATE,
