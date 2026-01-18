@@ -86,12 +86,14 @@ module.exports = {
 
   // ML Services
   mlService: {
-    url: process.env.ML_SERVICE_URL || 'http://localhost:8000',
+    url: process.env.ML_SERVICE_URL || 'http://localhost:8001',
     timeout: parseInt(process.env.ML_SERVICE_TIMEOUT, 10) || 30000,
+    retries: parseInt(process.env.ML_SERVICE_RETRIES, 10) || 3,
+    enabled: process.env.ML_SERVICE_ENABLED !== 'false',
   },
 
   optimizationService: {
-    url: process.env.OPTIMIZATION_SERVICE_URL || 'http://localhost:8001',
+    url: process.env.OPTIMIZATION_SERVICE_URL || 'http://localhost:8002',
     timeout: 60000,
   },
 

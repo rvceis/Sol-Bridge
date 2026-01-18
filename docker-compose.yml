@@ -49,25 +49,25 @@ services:
       timeout: 5s
       retries: 5
 
-  # MQTT Broker (Mosquitto)
-  mqtt:
-    image: eclipse-mosquitto:latest
-    container_name: solar_mqtt
-    ports:
-      - "1883:1883"
-      - "9001:9001"
-    volumes:
-      - ./mqtt-config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - ./mqtt-config/passwd:/mosquitto/config/passwd
-      - mqtt_data:/mosquitto/data
-      - mqtt_logs:/mosquitto/log
+  # MQTT Broker (Mosquitto) - COMMENTED OUT, use Docker run or system service
+  # mqtt:
+  #   image: eclipse-mosquitto:latest
+  #   container_name: solar_mqtt
+  #   ports:
+  #     - "1883:1883"
+  #     - "9001:9001"
+  #   volumes:
+  #     - ./mqtt-config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+  #     - ./mqtt-config/passwd:/mosquitto/config/passwd
+  #     - mqtt_data:/mosquitto/data
+  #     - mqtt_logs:/mosquitto/log
 
 volumes:
   postgres_data:
   timescaledb_data:
   redis_data:
-  mqtt_data:
-  mqtt_logs:
+  # mqtt_data:
+  # mqtt_logs:
 
 networks:
   default:

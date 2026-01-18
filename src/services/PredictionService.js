@@ -1,15 +1,17 @@
 const db = require('../database');
 const logger = require('../utils/logger');
 const { cacheGet, cacheSet } = require('../utils/cache');
+const axios = require('axios');
+const config = require('../config');
 
 /**
  * PredictionService: AI/ML predictions for solar energy forecasting and consumption analysis
- * Week 1 MVP: Panel output prediction + Consumption pattern analysis
+ * Integrates with ML service (Python/FastAPI) for advanced predictions
  */
 class PredictionService {
   /**
    * Predict solar panel output for next N days
-   * Uses 30-day historical data with exponential smoothing and trend analysis
+   * Calls ML service if available, falls back to rule-based prediction
    */
   async predictPanelOutput(deviceId, userId, days = 7) {
     try {
@@ -34,21 +36,25 @@ class PredictionService {
       const device = deviceResult.rows[0];
       const capacity = device.capacity_kwh || 5; // Default 5kW
 
-      // Get last 30 days of readings
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const readingsResult = await db.query(
-        `SELECT time, power_kw FROM energy_readings 
-         WHERE device_id = $1 AND user_id = $2 AND time >= $3
-         ORDER BY time DESC
-         LIMIT 1440`, // ~30 days of hourly data
-        [deviceId, userId, thirtyDaysAgo]
-      );
+      // Get historical readings for ML service
+      const readings = await this._getDeviceReadings(deviceId, userId, 30);
 
-      const readings = readingsResult.rows.map(r => ({
-        timestamp: new Date(r.time),
-        power: parseFloat(r.power_kw) || 0,
-      }));
+      // Try ML service first if enabled
+      if (config.mlService.enabled && readings.length >= 24) {
+        try {
+          const mlPrediction = await this._callMLServiceForSolar(deviceId, capacity, readings, days);
+          if (mlPrediction) {
+            logger.info(`ML service prediction successful for ${deviceId}`);
+            // Cache for 6 hours
+            await cacheSet(cacheKey, mlPrediction, 6 * 60 * 60);
+            return mlPrediction;
+          }
+        } catch (mlError) {
+          logger.warn(`ML service failed for ${deviceId}, falling back to rule-based: ${mlError.message}`);
+        }
+      }
 
+      // Fallback: Rule-based prediction
       if (readings.length < 7) {
         logger.warn(`Insufficient data for prediction: only ${readings.length} readings`);
         return this._generateBasePrediction(days, capacity);
@@ -75,6 +81,7 @@ class PredictionService {
           capacity,
           dataPoints: readings.length,
           daysOfHistory: Math.ceil(readings.length / 24),
+          source: 'rule-based',
         },
       };
 
@@ -86,6 +93,118 @@ class PredictionService {
       logger.error('Error predicting panel output:', error);
       throw error;
     }
+  }
+
+  /**
+   * Get device readings for ML service
+   */
+  async _getDeviceReadings(deviceId, userId, days = 30) {
+    const daysAgo = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const result = await db.query(
+      `SELECT 
+        time as timestamp,
+        power_kw,
+        temperature,
+        voltage,
+        current,
+        frequency
+      FROM energy_readings 
+      WHERE device_id = $1 AND user_id = $2 AND time >= $3
+      ORDER BY time DESC
+      LIMIT 2000`,
+      [deviceId, userId, daysAgo]
+    );
+
+    return result.rows.map(r => ({
+      timestamp: new Date(r.timestamp),
+      power: parseFloat(r.power_kw) || 0,
+      temperature: parseFloat(r.temperature) || 25,
+      voltage: parseFloat(r.voltage) || 230,
+      current: parseFloat(r.current) || 0,
+      frequency: parseFloat(r.frequency) || 50,
+    }));
+  }
+
+  /**
+   * Call ML service for solar forecast
+   */
+  async _callMLServiceForSolar(deviceId, capacity, readings, days) {
+    try {
+      const historicalData = readings.slice(0, 500).map(r => ({
+        device_id: deviceId,
+        timestamp: r.timestamp.toISOString(),
+        power_kw: r.power,
+        temperature: r.temperature,
+        voltage: r.voltage,
+        current: r.current,
+        frequency: r.frequency,
+        system_capacity_kw: capacity,
+      }));
+
+      const response = await axios.post(
+        `${config.mlService.url}/api/v1/forecast/solar`,
+        {
+          host_id: deviceId,
+          panel_capacity_kw: capacity,
+          historical_data: historicalData,
+          weather_forecast: [], // TODO: integrate weather API
+          forecast_hours: days * 24,
+        },
+        {
+          timeout: config.mlService.timeout,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+      if (response.data && response.data.predictions) {
+        return {
+          deviceId,
+          generatedAt: new Date(),
+          confidence: response.data.confidence || 0.85,
+          forecasts: this._formatMLForecasts(response.data.predictions, days),
+          metadata: {
+            capacity,
+            dataPoints: readings.length,
+            source: 'ml-service',
+            model: response.data.model_used || 'xgboost',
+          },
+        };
+      }
+      return null;
+    } catch (error) {
+      if (error.code === 'ECONNREFUSED') {
+        logger.warn('ML service not available (connection refused)');
+      } else {
+        logger.error('ML service error:', error.message);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Format ML service predictions into daily forecasts
+   */
+  _formatMLForecasts(hourlyPredictions, days) {
+    const forecasts = [];
+    const hoursPerDay = 24;
+
+    for (let day = 0; day < days; day++) {
+      const startIdx = day * hoursPerDay;
+      const endIdx = startIdx + hoursPerDay;
+      const dayPredictions = hourlyPredictions.slice(startIdx, endIdx);
+
+      if (dayPredictions.length === 0) break;
+
+      const avgPrediction = dayPredictions.reduce((sum, p) => sum + p, 0) / dayPredictions.length;
+
+      forecasts.push({
+        date: new Date(Date.now() + (day + 1) * 24 * 60 * 60 * 1000),
+        predicted: parseFloat(avgPrediction.toFixed(2)),
+        hourly: dayPredictions,
+      });
+    }
+
+    return forecasts;
   }
 
   /**
