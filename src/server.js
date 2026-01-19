@@ -33,6 +33,7 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const investmentRoutes = require('./routes/investmentRoutes');
 const registrationRoutes = require('./routes/registrationRoutes');
 const reportsRoutes = require('./routes/reportsRoutes');
+const energySourceRoutes = require('./routes/energySourceRoutes');
 
 // Services
 const iotService = require('./services/IoTDataService');
@@ -115,6 +116,7 @@ app.use(`/api/${config.apiVersion}/investments`, investmentRoutes);
 app.use(`/api/${config.apiVersion}/host`, registrationRoutes);
 app.use(`/api/${config.apiVersion}/industry`, registrationRoutes);
 app.use(`/api/${config.apiVersion}/reports`, reportsRoutes);
+app.use(`/api/${config.apiVersion}/energy-sources`, energySourceRoutes);
 
 // ===== 404 Handler =====
 app.use((req, res) => {

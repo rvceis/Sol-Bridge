@@ -88,6 +88,50 @@ const migrations = [
         throw error;
       }
     }
+  },
+  {
+    id: '004-create-buyer-energy-sources',
+    description: 'Create buyer_energy_sources table for saving matched hosts',
+    up: async (client) => {
+      try {
+        // Create table for buyer's saved energy sources (matched hosts)
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS buyer_energy_sources (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            buyer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            host_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            source_name VARCHAR(255),
+            match_score DECIMAL(5, 2),
+            price_per_kwh DECIMAL(6, 2),
+            distance_km DECIMAL(10, 2),
+            renewable_certified BOOLEAN DEFAULT FALSE,
+            is_active BOOLEAN DEFAULT TRUE,
+            subscription_type VARCHAR(20) DEFAULT 'on-demand' CHECK (subscription_type IN ('on-demand', 'monthly', 'yearly')),
+            notes TEXT,
+            matched_at TIMESTAMPTZ DEFAULT NOW(),
+            last_purchase_at TIMESTAMPTZ,
+            total_energy_purchased DECIMAL(12, 2) DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            
+            CONSTRAINT unique_buyer_host_source UNIQUE (buyer_id, host_id)
+          )
+        `);
+
+        await client.query('CREATE INDEX IF NOT EXISTS idx_buyer_sources_buyer ON buyer_energy_sources(buyer_id)');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_buyer_sources_host ON buyer_energy_sources(host_id)');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_buyer_sources_active ON buyer_energy_sources(buyer_id, is_active)');
+
+        logger.info('✓ Migration 004: Created buyer_energy_sources table');
+        return true;
+      } catch (error) {
+        logger.warn(`Migration 004 error: ${error.message}`);
+        if (error.message.includes('already exists')) {
+          return true;
+        }
+        throw error;
+      }
+    }
   }
 ];
 
