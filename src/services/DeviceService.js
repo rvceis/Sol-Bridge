@@ -2,6 +2,20 @@ const db = require('../database');
 const logger = require('../utils/logger');
 
 class DeviceService {
+  // Ensure devices table has required columns (idempotent)
+  async ensureDeviceSchema() {
+    try {
+      await db.query(`
+        ALTER TABLE devices
+        ADD COLUMN IF NOT EXISTS device_name VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS capacity_kwh DECIMAL(10, 2),
+        ADD COLUMN IF NOT EXISTS efficiency_rating DECIMAL(5, 2),
+        ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
+      `);
+    } catch (error) {
+      logger.warn('ensureDeviceSchema: failed to alter devices table (may already be up-to-date):', error.message);
+    }
+  }
   // Get user's devices
   async getUserDevices(userId) {
     try {
@@ -49,6 +63,9 @@ class DeviceService {
   // Create device
   async createDevice(userId, deviceData) {
     try {
+      // Ensure schema columns exist (handles legacy DBs)
+      await this.ensureDeviceSchema();
+
       const {
         device_name,
         device_type,
