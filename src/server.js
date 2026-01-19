@@ -29,6 +29,10 @@ const profileKYCRoutes = require('./routes/profile');
 const bankAccountRoutes = require('./routes/bankAccounts');
 const withdrawalRoutes = require('./routes/withdrawals');
 const predictionRoutes = require('./routes/predictionRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
+const investmentRoutes = require('./routes/investmentRoutes');
+const registrationRoutes = require('./routes/registrationRoutes');
+const reportsRoutes = require('./routes/reportsRoutes');
 
 // Services
 const iotService = require('./services/IoTDataService');
@@ -106,6 +110,11 @@ app.use(`/api/${config.apiVersion}/profile`, profileKYCRoutes);
 app.use(`/api/${config.apiVersion}/bank-accounts`, bankAccountRoutes);
 app.use(`/api/${config.apiVersion}/withdrawals`, withdrawalRoutes);
 app.use(`/api/${config.apiVersion}`, predictionRoutes);
+app.use(`/api/${config.apiVersion}/dashboard`, dashboardRoutes);
+app.use(`/api/${config.apiVersion}/investments`, investmentRoutes);
+app.use(`/api/${config.apiVersion}/host`, registrationRoutes);
+app.use(`/api/${config.apiVersion}/industry`, registrationRoutes);
+app.use(`/api/${config.apiVersion}/reports`, reportsRoutes);
 
 // ===== 404 Handler =====
 app.use((req, res) => {
