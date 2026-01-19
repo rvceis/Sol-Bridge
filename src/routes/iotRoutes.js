@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const iotManager = require('../services/iotManager');
 const logger = require('../utils/logger');
+const iotController = require('../controllers/iotController');
 
 /**
  * POST /api/iot/devices - Register new device
@@ -140,5 +141,44 @@ router.get('/health', (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+/**
+ * POST /api/iot/ingest - Ingest a single device reading via HTTP
+ * Body schema:
+ * {
+ *   "device_id": "DEV_123",
+ *   "timestamp": "2026-01-19T10:00:00Z",
+ *   "measurements": {
+ *     "power_kw": 1.23,
+ *     "energy_kwh": 0.01,
+ *     "voltage": 230.1,
+ *     "current": 5.3,
+ *     "frequency": 50.0,
+ *     "temperature": 31.2
+ *   }
+ * }
+ */
+router.post('/iot/ingest', (req, res, next) => {
+  // Simple guard: require at least device_id and measurements
+  if (!req.body?.device_id || !req.body?.measurements) {
+    return res.status(400).json({
+      success: false,
+      error: 'ValidationError',
+      message: 'device_id and measurements are required',
+    });
+  }
+  return iotController.ingestData(req, res, next);
+});
+
+/**
+ * GET /api/iot/readings/latest - Latest reading for the authenticated user
+ * Note: If auth is disabled in your environment, this will return cached reading when available.
+ */
+router.get('/iot/readings/latest', (req, res, next) => iotController.getLatestReading(req, res, next));
+
+/**
+ * GET /api/iot/readings/history - Reading history for authenticated user
+ */
+router.get('/iot/readings/history', (req, res, next) => iotController.getReadingHistory(req, res, next));
 
 module.exports = router;
