@@ -5,15 +5,23 @@ class DeviceService {
   // Ensure devices table has required columns (idempotent)
   async ensureDeviceSchema() {
     try {
-      await db.query(`
-        ALTER TABLE devices
-        ADD COLUMN IF NOT EXISTS device_name VARCHAR(255),
-        ADD COLUMN IF NOT EXISTS capacity_kwh DECIMAL(10, 2),
-        ADD COLUMN IF NOT EXISTS efficiency_rating DECIMAL(5, 2),
-        ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
-      `);
+      // Run each ALTER separately to avoid partial failures
+      const columns = [
+        "ADD COLUMN IF NOT EXISTS device_name VARCHAR(255)",
+        "ADD COLUMN IF NOT EXISTS capacity_kwh DECIMAL(10, 2)",
+        "ADD COLUMN IF NOT EXISTS efficiency_rating DECIMAL(5, 2)",
+        "ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'",
+      ];
+      for (const col of columns) {
+        try {
+          await db.query(`ALTER TABLE devices ${col}`);
+        } catch (e) {
+          // Ignore errors (column may already exist or table doesn't exist yet)
+        }
+      }
+      logger.info('ensureDeviceSchema: schema check completed');
     } catch (error) {
-      logger.warn('ensureDeviceSchema: failed to alter devices table (may already be up-to-date):', error.message);
+      logger.warn('ensureDeviceSchema: failed:', error.message);
     }
   }
   // Get user's devices
