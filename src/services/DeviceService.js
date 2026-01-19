@@ -5,6 +5,14 @@ class DeviceService {
   // Ensure devices table has required columns (idempotent)
   async ensureDeviceSchema() {
     try {
+      // Drop the old restrictive CHECK constraint on device_type
+      try {
+        await db.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_device_type_check`);
+        logger.info('ensureDeviceSchema: dropped old device_type check constraint');
+      } catch (e) {
+        // Ignore if constraint doesn't exist
+      }
+
       // Run each ALTER separately to avoid partial failures
       const columns = [
         "ADD COLUMN IF NOT EXISTS device_name VARCHAR(255)",
@@ -100,15 +108,27 @@ class DeviceService {
       // Generate a unique device_id
       const device_id = `DEV_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+      // Log what we're inserting for debugging
+      logger.info('Creating device with data:', {
+        device_id,
+        userId,
+        device_name,
+        device_type,
+        capacity_kwh,
+        efficiency_rating,
+        formattedDate,
+        metadata: JSON.stringify(metadata)
+      });
+
       const result = await db.query(`
         INSERT INTO devices (device_id, user_id, device_name, device_type, capacity_kwh, efficiency_rating, installation_date, metadata, status, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW(), NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'active', NOW(), NOW())
         RETURNING *
-      `, [device_id, userId, device_name, device_type, capacity_kwh, efficiency_rating, formattedDate, JSON.stringify(metadata)]);
+      `, [device_id, userId, device_name, device_type, capacity_kwh || null, efficiency_rating || null, formattedDate, JSON.stringify(metadata)]);
 
       return result.rows[0];
     } catch (error) {
-      logger.error('Error creating device:', error);
+      logger.error('Error creating device:', error.message, error.stack);
       throw error;
     }
   }
