@@ -44,7 +44,13 @@ class LocationController {
         limitValue = MAX_LIMIT;
       }
 
-      const userTypes = types ? types.split(',').filter(t => ['seller', 'investor', 'hoster'].includes(t)) : ['seller'];
+      // Normalize role names: map 'hoster' -> 'host' and 'seller' -> 'buyer'
+      const rawTypes = types ? types.split(',').filter(t => ['seller', 'investor', 'hoster', 'host', 'buyer'].includes(t)) : ['buyer'];
+      const userTypes = rawTypes.map(t => {
+        if (t === 'hoster') return 'host';
+        if (t === 'seller') return 'buyer';
+        return t;
+      });
       const sortBy = sort && ['distance', 'rating'].includes(sort) ? sort : 'distance';
 
       // Create cache key (rounded coordinates for cache hits)
@@ -77,7 +83,8 @@ class LocationController {
       // Privacy: hide exact coordinates, expose only city/distance
       const privacyShapedUsers = users.map(user => ({
         id: user.id,
-        name: user.full_name,
+        full_name: user.full_name,
+        email: user.email,
         role: user.role,
         kyc_status: user.kyc_status,
         city: user.city,
