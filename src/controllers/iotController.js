@@ -22,7 +22,10 @@ const ingestData = asyncHandler(async (req, res) => {
 
 // Get latest reading - uses authenticated user's ID (with Redis caching)
 const getLatestReading = asyncHandler(async (req, res) => {
-  const userId = req.user.id;
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Login required' });
+  }
   const cacheKey = `iot:latest:${userId}`;
   
   // Try cache first (30 second TTL for real-time data)
@@ -71,7 +74,10 @@ const getLatestReading = asyncHandler(async (req, res) => {
 
 // Get reading history - uses authenticated user's ID
 const getReadingHistory = asyncHandler(async (req, res) => {
-  const userId = req.user.id; // Get from authenticated user
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Login required' });
+  }
   const {
     startDate,
     endDate,

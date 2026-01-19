@@ -3,6 +3,7 @@ const router = express.Router();
 const iotManager = require('../services/iotManager');
 const logger = require('../utils/logger');
 const iotController = require('../controllers/iotController');
+const { authenticate } = require('../middleware/auth');
 
 /**
  * POST /api/iot/devices - Register new device
@@ -173,11 +174,12 @@ router.post('/iot/ingest', (req, res, next) => {
  * GET /api/iot/readings/latest - Latest reading for the authenticated user
  * Note: If auth is disabled in your environment, this will return cached reading when available.
  */
-router.get('/iot/readings/latest', (req, res, next) => iotController.getLatestReading(req, res, next));
+// Protected: requires user auth for personalized readings
+router.get('/iot/readings/latest', authenticate, (req, res, next) => iotController.getLatestReading(req, res, next));
 
 /**
  * GET /api/iot/readings/history - Reading history for authenticated user
  */
-router.get('/iot/readings/history', (req, res, next) => iotController.getReadingHistory(req, res, next));
+router.get('/iot/readings/history', authenticate, (req, res, next) => iotController.getReadingHistory(req, res, next));
 
 module.exports = router;

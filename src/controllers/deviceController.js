@@ -58,6 +58,37 @@ class DeviceController {
       }
 
       const deviceData = req.body;
+      const { device_name, device_type, capacity_kwh, efficiency_rating, installation_date } = deviceData;
+      if (!device_name || typeof device_name !== 'string' || !device_name.trim()) {
+        return res.status(400).json({ success: false, error: 'ValidationError', message: 'device_name is required' });
+      }
+      if (!device_type || typeof device_type !== 'string' || !device_type.trim()) {
+        return res.status(400).json({ success: false, error: 'ValidationError', message: 'device_type is required' });
+      }
+      if (capacity_kwh !== undefined && capacity_kwh !== null) {
+        const c = Number(capacity_kwh);
+        if (Number.isNaN(c) || c < 0) {
+          return res.status(400).json({ success: false, error: 'ValidationError', message: 'capacity_kwh must be a non-negative number' });
+        }
+        deviceData.capacity_kwh = c;
+      }
+      if (efficiency_rating !== undefined && efficiency_rating !== null) {
+        const e = Number(efficiency_rating);
+        if (Number.isNaN(e) || e < 0 || e > 100) {
+          return res.status(400).json({ success: false, error: 'ValidationError', message: 'efficiency_rating must be between 0 and 100' });
+        }
+        deviceData.efficiency_rating = e;
+      }
+      if (installation_date) {
+        const dateStr = String(installation_date).trim();
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(dateStr) || Number.isNaN(new Date(dateStr).getTime())) {
+          deviceData.installation_date = null;
+        } else {
+          deviceData.installation_date = dateStr;
+        }
+      }
+
       const device = await DeviceService.createDevice(userId, deviceData);
       res.status(201).json({ success: true, data: device });
     } catch (error) {
