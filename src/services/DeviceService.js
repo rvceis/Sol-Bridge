@@ -58,6 +58,20 @@ class DeviceService {
         metadata = {}
       } = deviceData;
 
+      // Validate and format installation_date
+      let formattedDate = null;
+      if (installation_date) {
+        // Check if it's a valid date format (YYYY-MM-DD)
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (typeof installation_date === 'string' && dateRegex.test(installation_date.trim())) {
+          // Verify it's an actual valid date
+          const dateObj = new Date(installation_date);
+          if (!isNaN(dateObj.getTime())) {
+            formattedDate = installation_date.trim();
+          }
+        }
+      }
+
       // Generate a unique device_id
       const device_id = `DEV_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -65,7 +79,7 @@ class DeviceService {
         INSERT INTO devices (device_id, user_id, device_name, device_type, capacity_kwh, efficiency_rating, installation_date, metadata, status, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW(), NOW())
         RETURNING *
-      `, [device_id, userId, device_name, device_type, capacity_kwh, efficiency_rating, installation_date, JSON.stringify(metadata)]);
+      `, [device_id, userId, device_name, device_type, capacity_kwh, efficiency_rating, formattedDate, JSON.stringify(metadata)]);
 
       return result.rows[0];
     } catch (error) {
@@ -84,6 +98,19 @@ class DeviceService {
         if (allowedFields.includes(key)) {
           if (key === 'metadata') {
             updateFields[key] = JSON.stringify(updates[key]);
+          } else if (key === 'installation_date') {
+            // Validate and format installation_date
+            if (updates[key]) {
+              const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+              if (typeof updates[key] === 'string' && dateRegex.test(updates[key].trim())) {
+                const dateObj = new Date(updates[key]);
+                if (!isNaN(dateObj.getTime())) {
+                  updateFields[key] = updates[key].trim();
+                }
+              }
+            } else {
+              updateFields[key] = null;
+            }
           } else {
             updateFields[key] = updates[key];
           }
