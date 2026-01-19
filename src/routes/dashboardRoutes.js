@@ -5,9 +5,29 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
-const db = require('../config/database');
-const redis = require('../config/redis');
+const { authenticate } = require('../middleware/auth');
+const db = require('../database');
+const { redis, redisAvailable } = require('../utils/cache');
+
+// Simple cache helper
+const getCache = async (key) => {
+  if (!redis || !redisAvailable) return null;
+  try {
+    const data = await redis.get(key);
+    return data ? JSON.parse(data) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const setCache = async (key, value, ttl = 300) => {
+  if (!redis || !redisAvailable) return;
+  try {
+    await redis.setex(key, ttl, JSON.stringify(value));
+  } catch (e) {
+    // silently fail
+  }
+};
 
 // ============================================
 // BUYER DASHBOARD
@@ -17,15 +37,15 @@ const redis = require('../config/redis');
  * GET /api/v1/dashboard/buyer
  * Get buyer's investment portfolio summary
  */
-router.get('/buyer', authenticateToken, async (req, res) => {
+router.get('/buyer', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const cacheKey = `dashboard:buyer:${userId}`;
 
     // Check cache
-    const cached = await redis.get(cacheKey);
+    const cached = await getCache(cacheKey);
     if (cached) {
-      return res.json(JSON.parse(cached));
+      return res.json(cached);
     }
 
     // Get investment summary
@@ -86,7 +106,7 @@ router.get('/buyer', authenticateToken, async (req, res) => {
     };
 
     // Cache for 5 minutes
-    await redis.setex(cacheKey, 300, JSON.stringify(response));
+    await setCache(cacheKey, response, 300);
 
     res.json(response);
   } catch (error) {
@@ -103,7 +123,7 @@ router.get('/buyer', authenticateToken, async (req, res) => {
  * GET /api/v1/dashboard/host
  * Get host's panel space summary
  */
-router.get('/host', authenticateToken, async (req, res) => {
+router.get('/host', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const cacheKey = `dashboard:host:${userId}`;
@@ -214,7 +234,7 @@ router.get('/host', authenticateToken, async (req, res) => {
     };
 
     // Cache for 5 minutes
-    await redis.setex(cacheKey, 300, JSON.stringify(response));
+    await setCache(cacheKey, response, 300);
 
     res.json(response);
   } catch (error) {
@@ -231,7 +251,7 @@ router.get('/host', authenticateToken, async (req, res) => {
  * GET /api/v1/dashboard/industry
  * Get industry's energy consumption and suppliers
  */
-router.get('/industry', authenticateToken, async (req, res) => {
+router.get('/industry', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const period = req.query.period || 'week'; // week or month
@@ -345,7 +365,7 @@ router.get('/industry', authenticateToken, async (req, res) => {
     };
 
     // Cache for 5 minutes
-    await redis.setex(cacheKey, 300, JSON.stringify(response));
+    await setCache(cacheKey, response, 300);
 
     res.json(response);
   } catch (error) {

@@ -5,16 +5,16 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 const certificateService = require('../services/certificateService');
 const exportService = require('../services/exportService');
-const db = require('../config/database');
+const db = require('../database');
 
 /**
  * GET /api/v1/reports/energy-certificate
  * Generate energy certificate for industry
  */
-router.get('/energy-certificate', authenticateToken, async (req, res) => {
+router.get('/energy-certificate', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { period } = req.query; // 'month' or 'year'
@@ -62,7 +62,7 @@ router.get('/energy-certificate', authenticateToken, async (req, res) => {
  * GET /api/v1/reports/carbon-offset-report
  * Generate carbon offset report
  */
-router.get('/carbon-offset-report', authenticateToken, async (req, res) => {
+router.get('/carbon-offset-report', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -99,7 +99,7 @@ router.get('/carbon-offset-report', authenticateToken, async (req, res) => {
  * GET /api/v1/reports/investment-certificate/:investmentId
  * Generate investment certificate
  */
-router.get('/investment-certificate/:investmentId', authenticateToken, async (req, res) => {
+router.get('/investment-certificate/:investmentId', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { investmentId } = req.params;
@@ -138,7 +138,7 @@ router.get('/investment-certificate/:investmentId', authenticateToken, async (re
  * GET /api/v1/reports/export/transactions
  * Export transaction history as CSV
  */
-router.get('/export/transactions', authenticateToken, async (req, res) => {
+router.get('/export/transactions', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { startDate, endDate } = req.query;
@@ -163,7 +163,7 @@ router.get('/export/transactions', authenticateToken, async (req, res) => {
  * GET /api/v1/reports/export/production
  * Export production data as CSV
  */
-router.get('/export/production', authenticateToken, async (req, res) => {
+router.get('/export/production', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { startDate, endDate } = req.query;
@@ -188,7 +188,7 @@ router.get('/export/production', authenticateToken, async (req, res) => {
  * GET /api/v1/reports/export/billing
  * Export billing data as CSV (for industries)
  */
-router.get('/export/billing', authenticateToken, async (req, res) => {
+router.get('/export/billing', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { startDate, endDate } = req.query;
@@ -223,7 +223,7 @@ router.get('/export/billing', authenticateToken, async (req, res) => {
  * GET /api/v1/reports/export/investments-summary
  * Export investment summary as CSV
  */
-router.get('/export/investments-summary', authenticateToken, async (req, res) => {
+router.get('/export/investments-summary', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -244,7 +244,7 @@ router.get('/export/investments-summary', authenticateToken, async (req, res) =>
  * GET /api/v1/reports/export/host-earnings
  * Export host earnings as CSV
  */
-router.get('/export/host-earnings', authenticateToken, async (req, res) => {
+router.get('/export/host-earnings', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { startDate, endDate } = req.query;

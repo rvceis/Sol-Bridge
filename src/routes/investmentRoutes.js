@@ -5,29 +5,56 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
-const db = require('../config/database');
-const redis = require('../config/redis');
-const Razorpay = require('razorpay');
-const crypto = require('crypto');
+const { authenticate } = require('../middleware/auth');
+const db = require('../database');
+const { redis, redisAvailable } = require('../utils/cache');
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Cache helper functions
+const getCache = async (key) => {
+  if (!redis || !redisAvailable) return null;
+  try {
+    const data = await redis.get(key);
+    return data ? JSON.parse(data) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const setCache = async (key, value, ttl = 300) => {
+  if (!redis || !redisAvailable) return;
+  try {
+    await redis.setex(key, ttl, JSON.stringify(value));
+  } catch (e) {
+    // silently fail
+  }
+};
+
+const delCache = async (keys) => {
+  if (!redis || !redisAvailable) return;
+  try {
+    if (Array.isArray(keys)) {
+      for (const key of keys) {
+        await redis.del(key);
+      }
+    } else {
+      await redis.del(keys);
+    }
+  } catch (e) {
+    // silently fail
+  }
+};
 
 /**
  * GET /api/v1/investments/opportunities
  * Get available investment opportunities with AI matching
  */
-router.get('/opportunities', authenticateToken, async (req, res) => {
+router.get('/opportunities', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const cacheKey = `opportunities:${userId}`;
 
     // Check cache
-    const cached = await redis.get(cacheKey);
+    const cached = await getCache(cacheKey);
     if (cached) {
       return res.json(JSON.parse(cached));
     }
@@ -91,7 +118,7 @@ router.get('/opportunities', authenticateToken, async (req, res) => {
     };
 
     // Cache for 10 minutes
-    await redis.setex(cacheKey, 600, JSON.stringify(response));
+    await setCache(cacheKey, response, 600);
 
     res.json(response);
   } catch (error) {
@@ -104,15 +131,15 @@ router.get('/opportunities', authenticateToken, async (req, res) => {
  * GET /api/v1/investments/opportunities/:id
  * Get detailed investment opportunity
  */
-router.get('/opportunities/:id', authenticateToken, async (req, res) => {
+router.get('/opportunities/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const cacheKey = `opportunity:${id}`;
 
     // Check cache
-    const cached = await redis.get(cacheKey);
+    const cached = await getCache(cacheKey);
     if (cached) {
-      return res.json(JSON.parse(cached));
+      return res.json(cached);
     }
 
     // Get host space detail
@@ -185,7 +212,7 @@ router.get('/opportunities/:id', authenticateToken, async (req, res) => {
     };
 
     // Cache for 10 minutes
-    await redis.setex(cacheKey, 600, JSON.stringify(response));
+    await setCache(cacheKey, response, 600);
 
     res.json(response);
   } catch (error) {
@@ -195,10 +222,10 @@ router.get('/opportunities/:id', authenticateToken, async (req, res) => {
 });
 
 /**
- * POST /api/v1/investments/create-order
- * Create Razorpay order for investment
+ * POST /api/v1/investments/create-investment
+ * Create investment directly (payment skipped for now)
  */
-router.post('/create-order', authenticateToken, async (req, res) => {
+router.post('/create-investment', authenticate, async (req, res) => {
   try {
     const { opportunity_id, industry_id, amount } = req.body;
     const userId = req.user.id;
@@ -209,7 +236,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
     // Verify opportunity is still available
     const spaceQuery = `
-      SELECT available_capacity_kw, host_id 
+      SELECT id, host_id, available_capacity_kw, city, state 
       FROM host_spaces 
       WHERE id = $1 AND status = 'available' AND available_capacity_kw >= 5
     `;
@@ -219,99 +246,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Investment opportunity not available' });
     }
 
-    // Create Razorpay order
-    const options = {
-      amount: amount * 100, // Convert to paise
-      currency: 'INR',
-      receipt: `invest_${Date.now()}`,
-      notes: {
-        user_id: userId,
-        opportunity_id,
-        industry_id,
-        type: 'solar_investment',
-      },
-    };
-
-    const order = await razorpay.orders.create(options);
-
-    // Store pending investment
-    const insertQuery = `
-      INSERT INTO pending_investments (
-        razorpay_order_id,
-        buyer_id,
-        host_space_id,
-        industry_id,
-        amount,
-        status,
-        created_at
-      ) VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
-      RETURNING id
-    `;
-
-    await db.query(insertQuery, [
-      order.id,
-      userId,
-      opportunity_id,
-      industry_id,
-      amount,
-    ]);
-
-    res.json({
-      order_id: order.id,
-      amount: order.amount,
-      currency: order.currency,
-    });
-  } catch (error) {
-    console.error('Create order error:', error);
-    res.status(500).json({ error: 'Failed to create payment order' });
-  }
-});
-
-/**
- * POST /api/v1/investments/verify-payment
- * Verify Razorpay payment and create investment
- */
-router.post('/verify-payment', authenticateToken, async (req, res) => {
-  try {
-    const { order_id, payment_id, signature, opportunity_id, industry_id } = req.body;
-    const userId = req.user.id;
-
-    if (!order_id || !payment_id || !signature) {
-      return res.status(400).json({ error: 'Missing payment details' });
-    }
-
-    // Verify signature
-    const generatedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(`${order_id}|${payment_id}`)
-      .digest('hex');
-
-    if (generatedSignature !== signature) {
-      return res.status(400).json({ error: 'Invalid payment signature' });
-    }
-
-    // Get pending investment
-    const pendingQuery = `
-      SELECT * FROM pending_investments 
-      WHERE razorpay_order_id = $1 AND buyer_id = $2 AND status = 'pending'
-    `;
-    const pendingResult = await db.query(pendingQuery, [order_id, userId]);
-
-    if (!pendingResult.rows.length) {
-      return res.status(400).json({ error: 'Pending investment not found' });
-    }
-
-    const pending = pendingResult.rows[0];
-
-    // Get host space details
-    const spaceQuery = `
-      SELECT host_id, available_capacity_kw, city, state 
-      FROM host_spaces 
-      WHERE id = $1
-    `;
-    const spaceResult = await db.query(spaceQuery, [pending.host_space_id]);
     const space = spaceResult.rows[0];
-
     const capacity = 5; // Standard 5kW panel
 
     // Begin transaction
@@ -332,32 +267,24 @@ router.post('/verify-payment', authenticateToken, async (req, res) => {
           status,
           installation_date,
           next_maintenance_date,
-          razorpay_payment_id,
-          razorpay_order_id,
-          host_location_city,
-          host_location_state,
           created_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, 'active',
           NOW() + INTERVAL '7 days',
           NOW() + INTERVAL '90 days',
-          $9, $10, $11, $12, NOW()
+          NOW()
         ) RETURNING id
       `;
 
       const investmentResult = await db.query(investmentQuery, [
         userId,
         space.host_id,
-        pending.host_space_id,
+        opportunity_id,
         capacity,
-        pending.amount,
+        amount,
         capacity * 150, // Monthly production
         capacity * 150 * 8 * 0.75, // Net profit (85% - rent - fee)
         18.0, // ROI
-        payment_id,
-        order_id,
-        space.city,
-        space.state,
       ]);
 
       const investmentId = investmentResult.rows[0].id;
@@ -382,54 +309,29 @@ router.post('/verify-payment', authenticateToken, async (req, res) => {
         SET available_capacity_kw = available_capacity_kw - $1
         WHERE id = $2
       `;
-      await db.query(updateSpaceQuery, [capacity, pending.host_space_id]);
-
-      // Update pending investment
-      const updatePendingQuery = `
-        UPDATE pending_investments 
-        SET status = 'completed', razorpay_payment_id = $1, updated_at = NOW()
-        WHERE id = $2
-      `;
-      await db.query(updatePendingQuery, [payment_id, pending.id]);
-
-      // Create transaction record
-      const transactionQuery = `
-        INSERT INTO transactions (
-          user_id,
-          transaction_type,
-          amount,
-          status,
-          description,
-          razorpay_payment_id,
-          created_at
-        ) VALUES ($1, 'investment', $2, 'completed', $3, $4, NOW())
-      `;
-      await db.query(transactionQuery, [
-        userId,
-        pending.amount,
-        `Solar panel investment - ${capacity}kW`,
-        payment_id,
-      ]);
+      await db.query(updateSpaceQuery, [capacity, opportunity_id]);
 
       await db.query('COMMIT');
 
       // Clear cache
-      await redis.del(`dashboard:buyer:${userId}`);
-      await redis.del(`dashboard:host:${space.host_id}`);
-      await redis.del(`opportunities:${userId}`);
+      await delCache([
+        `dashboard:buyer:${userId}`,
+        `dashboard:host:${space.host_id}`,
+        `opportunities:${userId}`,
+      ]);
 
       res.json({
         success: true,
         investment_id: investmentId,
-        message: 'Investment successful',
+        message: 'Investment created successfully',
       });
     } catch (err) {
       await db.query('ROLLBACK');
       throw err;
     }
   } catch (error) {
-    console.error('Payment verification error:', error);
-    res.status(500).json({ error: 'Failed to verify payment' });
+    console.error('Create investment error:', error);
+    res.status(500).json({ error: 'Failed to create investment' });
   }
 });
 

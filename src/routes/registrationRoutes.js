@@ -5,11 +5,27 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
-const db = require('../config/database');
-const redis = require('../config/redis');
+const { authenticate } = require('../middleware/auth');
+const db = require('../database');
+const { redis, redisAvailable } = require('../utils/cache');
 const multer = require('multer');
 const path = require('path');
+
+// Cache helper functions
+const delCache = async (keys) => {
+  if (!redis || !redisAvailable) return;
+  try {
+    if (Array.isArray(keys)) {
+      for (const key of keys) {
+        await redis.del(key);
+      }
+    } else {
+      await redis.del(keys);
+    }
+  } catch (e) {
+    // silently fail
+  }
+};
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -18,6 +34,7 @@ const storage = multer.diskStorage({
       file.fieldname === 'property_images'
         ? './uploads/properties/'
         : './uploads/certificates/';
+
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
@@ -54,7 +71,7 @@ const upload = multer({
  */
 router.post(
   '/register-space',
-  authenticateToken,
+  authenticate,
   upload.fields([
     { name: 'property_images', maxCount: 5 },
     { name: 'structural_certificate', maxCount: 1 },
@@ -159,7 +176,7 @@ router.post(
       ]);
 
       // Clear cache
-      await redis.del(`opportunities:*`);
+      await delCache(`opportunities:*`);
 
       res.json({
         success: true,
@@ -177,7 +194,7 @@ router.post(
  * POST /api/v1/host/update-capacity
  * Update host space capacity
  */
-router.post('/update-capacity', authenticateToken, async (req, res) => {
+router.post('/update-capacity', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { additional_capacity_kw } = req.body;
@@ -203,8 +220,10 @@ router.post('/update-capacity', authenticateToken, async (req, res) => {
     }
 
     // Clear cache
-    await redis.del(`dashboard:host:${userId}`);
-    await redis.del(`opportunities:*`);
+    await delCache([
+      `dashboard:host:${userId}`,
+      `opportunities:*`,
+    ]);
 
     res.json({
       success: true,
@@ -221,7 +240,7 @@ router.post('/update-capacity', authenticateToken, async (req, res) => {
  * POST /api/v1/industry/register
  * Register industry for energy procurement
  */
-router.post('/register', authenticateToken, async (req, res) => {
+router.post('/register', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const {
@@ -339,7 +358,7 @@ router.post('/register', authenticateToken, async (req, res) => {
  * GET /api/v1/industry/suppliers
  * Find available solar suppliers for industry
  */
-router.get('/suppliers', authenticateToken, async (req, res) => {
+router.get('/suppliers', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
 

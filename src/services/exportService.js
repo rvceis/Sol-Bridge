@@ -6,7 +6,7 @@
 const { Parser } = require('json2csv');
 const fs = require('fs');
 const path = require('path');
-const db = require('../config/database');
+const db = require('../database');
 
 class ExportService {
   constructor() {
