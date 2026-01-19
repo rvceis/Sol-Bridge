@@ -11,12 +11,11 @@ router.post('/devices', async (req, res) => {
   try {
     const { device_id, name, location_id, capacity_kw } = req.body;
 
-    if (!device_id) {
-      return res.status(400).json({ error: 'device_id required' });
-    }
+    // Generate device_id if not provided
+    const finalDeviceId = device_id || `DEV_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const device = iotManager.registerDevice({
-      device_id,
+      device_id: finalDeviceId,
       name,
       location_id,
       capacity_kw,
@@ -25,7 +24,7 @@ router.post('/devices', async (req, res) => {
     res.status(201).json({
       success: true,
       device,
-      mqtt_topic: `solar/${device_id}/data`,
+      mqtt_topic: `solar/${finalDeviceId}/data`,
     });
   } catch (err) {
     logger.error('Device registration error:', err);

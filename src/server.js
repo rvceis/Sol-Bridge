@@ -97,11 +97,11 @@ app.get('/health', async (req, res) => {
 
 // ===== API Routes =====
 app.use(`/api/${config.apiVersion}`, authRoutes);
+app.use(`/api/${config.apiVersion}/devices`, deviceRoutes); // Mount specific route BEFORE general routes
 app.use(`/api/${config.apiVersion}`, iotRoutes);
 app.use(`/api/${config.apiVersion}`, transactionRoutes);
 app.use(`/api/${config.apiVersion}/users`, profileRoutes);
 app.use(`/api/${config.apiVersion}/marketplace`, marketplaceRoutes);
-app.use(`/api/${config.apiVersion}/devices`, deviceRoutes);
 app.use(`/api/${config.apiVersion}/location`, locationRoutes);
 app.use(`/api/${config.apiVersion}/payment`, paymentRoutes);
 app.use(`/api/${config.apiVersion}/verification`, verificationRoutes);
