@@ -58,11 +58,14 @@ class DeviceService {
         metadata = {}
       } = deviceData;
 
+      // Generate a unique device_id
+      const device_id = `DEV_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
       const result = await db.query(`
-        INSERT INTO devices (user_id, device_name, device_type, capacity_kwh, efficiency_rating, installation_date, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO devices (device_id, user_id, device_name, device_type, capacity_kwh, efficiency_rating, installation_date, metadata, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW(), NOW())
         RETURNING *
-      `, [userId, device_name, device_type, capacity_kwh, efficiency_rating, installation_date, JSON.stringify(metadata)]);
+      `, [device_id, userId, device_name, device_type, capacity_kwh, efficiency_rating, installation_date, JSON.stringify(metadata)]);
 
       return result.rows[0];
     } catch (error) {
@@ -74,12 +77,16 @@ class DeviceService {
   // Update device
   async updateDevice(deviceId, updates) {
     try {
-      const allowedFields = ['device_name', 'device_type', 'capacity_kwh', 'efficiency_rating', 'installation_date', 'metadata'];
+      const allowedFields = ['device_name', 'device_type', 'capacity_kwh', 'efficiency_rating', 'installation_date', 'metadata', 'status'];
       const updateFields = {};
 
       Object.keys(updates).forEach(key => {
         if (allowedFields.includes(key)) {
-          updateFields[key] = updates[key];
+          if (key === 'metadata') {
+            updateFields[key] = JSON.stringify(updates[key]);
+          } else {
+            updateFields[key] = updates[key];
+          }
         }
       });
 
