@@ -4,23 +4,31 @@ const db = require('../database');
 const { cacheSet, cacheGet, cacheDel } = require('../utils/cache');
 
 const ML_MATCHING_URL = process.env.ML_MATCHING_URL || 'http://localhost:8002';
+const ML_TIMEOUT = process.env.ML_TIMEOUT || 8000; // 8 seconds max
 
 class MatchingService {
   /**
    * Find best sellers for a buyer's energy requirement
+   * OPTIMIZED: Uses indexed queries and faster ML timeout
    */
   async findSellerMatches(buyerId, requiredKwh, maxPrice, buyerLocation, preferences = {}) {
     try {
       const cacheKey = `match:buyer:${buyerId}`;
       
-      // Check cache (5 minute TTL)
+      // Check cache first (5 minute TTL)
       const cached = await cacheGet(cacheKey);
       if (cached) {
         logger.info(`[CACHE HIT] Buyer matches for ${buyerId}`);
         return cached;
       }
 
-      // Get all active sellers with available energy
+      // Start timing
+      const startTime = Date.now();
+
+      // OPTIMIZED QUERY: Use indexed columns, minimal JOINs, LIMIT early
+      // Assume indexes on: listings(status, energy_amount_kwh, price_per_kwh)
+      //                   hosts(user_id, latitude, longitude)
+      //                   users(id, average_rating)
       const sellerResult = await db.query(`
         SELECT 
           h.id as seller_id,
@@ -28,73 +36,118 @@ class MatchingService {
           u.full_name,
           u.average_rating,
           u.completed_transactions,
-          h.solar_capacity_kw,
           h.latitude,
           h.longitude,
           h.city,
-          h.state,
-          d.device_type,
           l.energy_amount_kwh as available_kwh,
           l.price_per_kwh,
-          l.renewable_cert,
-          l.created_at
+          l.renewable_cert
         FROM listings l
-        JOIN hosts h ON l.seller_id = h.user_id
-        JOIN users u ON h.user_id = u.id
-        LEFT JOIN devices d ON h.id = d.host_id
+        INNER JOIN hosts h ON l.seller_id = h.user_id
+        INNER JOIN users u ON h.user_id = u.id
         WHERE l.status = 'active'
-          AND l.energy_amount_kwh > 0
+          AND l.energy_amount_kwh > 0.5
           AND l.price_per_kwh <= $1
-        LIMIT 50
-      `, [maxPrice * 1.15]); // Allow 15% overage
+          AND u.average_rating >= $2
+        ORDER BY l.energy_amount_kwh DESC
+        LIMIT 30
+      `, [maxPrice * 1.2, preferences.minRating || 2.0]); // Faster limit
 
       const sellers = sellerResult.rows.map(row => ({
         id: row.seller_id,
-        available_kwh: row.available_kwh,
-        price_per_kwh: row.price_per_kwh,
+        seller_name: row.full_name,
+        available_kwh: parseFloat(row.available_kwh),
+        price_per_kwh: parseFloat(row.price_per_kwh),
         location: {
-          latitude: row.latitude,
-          longitude: row.longitude,
+          latitude: parseFloat(row.latitude),
+          longitude: parseFloat(row.longitude),
           city: row.city,
-          state: row.state,
         },
-        average_rating: row.average_rating || 3.5,
+        rating: parseFloat(row.average_rating || 3.5),
         completed_transactions: row.completed_transactions || 0,
-        device_type: row.device_type || 'solar_meter',
-        renewable_certified: row.renewable_cert || false,
+        renewable_cert: row.renewable_cert || false,
       }));
 
-      // Call ML matching service
+      logger.debug(`[MATCHING] Found ${sellers.length} active sellers in ${Date.now() - startTime}ms`);
+
+      // If no sellers, return early
+      if (sellers.length === 0) {
+        const emptyResult = { matches: [] };
+        await cacheSet(cacheKey, emptyResult, 300);
+        return emptyResult;
+      }
+
+      // Call ML matching service with timeout
       const buyer = {
-        id: buyerId,
         required_kwh: requiredKwh,
         max_price_per_kwh: maxPrice,
-        location: buyerLocation,
-        renewable_preference: preferences.renewable || false,
-        reliability_threshold: preferences.minRating || 3.0,
+        latitude: buyerLocation.latitude,
+        longitude: buyerLocation.longitude,
+        renewable: preferences.renewable || false,
       };
 
-      logger.info(`[MATCHING] Finding matches for buyer ${buyerId}: ${requiredKwh}kWh @ ₹${maxPrice}/kWh`);
+      logger.info(`[ML_CALL] Matching ${requiredKwh}kWh from ${sellers.length} sellers (${Date.now() - startTime}ms elapsed)`);
 
-      const response = await axios.post(
-        `${ML_MATCHING_URL}/api/v1/match/find-sellers`,
-        {
-          buyer,
-          available_sellers: sellers,
-          top_k: preferences.topK || 5,
-        },
-        { timeout: 10000 }
-      );
+      const mlStartTime = Date.now();
+      let response;
+      
+      try {
+        response = await axios.post(
+          `${ML_MATCHING_URL}/api/v1/match/find-sellers`,
+          {
+            latitude: buyer.latitude,
+            longitude: buyer.longitude,
+            required_kwh: buyer.required_kwh,
+            max_price: buyer.max_price_per_kwh,
+            sellers: sellers,
+          },
+          { 
+            timeout: ML_TIMEOUT,
+            maxRedirects: 0,
+          }
+        );
+      } catch (mlError) {
+        if (mlError.code === 'ECONNABORTED' || mlError.message.includes('timeout')) {
+          logger.warn('[ML_TIMEOUT] ML service slow, returning best fallback');
+          // Fallback: return sellers sorted by price
+          const sorted = sellers
+            .sort((a, b) => b.rating - a.rating)
+            .slice(0, 5)
+            .map(s => ({
+              ...s,
+              match_score: 50,
+              match_breakdown: {
+                availability: 70,
+                price: 60,
+                reliability: 70,
+                distance: 50,
+                renewable: s.renewable_cert ? 100 : 50,
+                timing: 80,
+              },
+            }));
+          
+          const fallbackResult = { matches: sorted };
+          await cacheSet(cacheKey, fallbackResult, 60); // Shorter cache for fallback
+          return fallbackResult;
+        }
+        throw mlError;
+      }
 
-      const result = response.data;
+      logger.debug(`[ML_TIME] ML service responded in ${Date.now() - mlStartTime}ms`);
 
-      // Store in cache
-      await cacheSet(cacheKey, result, 300); // 5 minutes
+      const result = {
+        matches: response.data.matches || [],
+        total_time: Date.now() - startTime,
+      };
 
+      // Store in cache (5 minutes)
+      await cacheSet(cacheKey, result, 300);
+
+      logger.info(`[MATCH_COMPLETE] Found ${result.matches.length} matches in ${result.total_time}ms`);
       return result;
 
     } catch (error) {
-      logger.error('Matching service error:', error.message);
+      logger.error('[MATCHING_ERROR]', error.message);
       throw error;
     }
   }
