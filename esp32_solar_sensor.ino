@@ -3,6 +3,7 @@
 #include <DHT.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <time.h>
 
 // ===== WiFi Credentials =====
 #define WIFI_SSID      "moto"
@@ -12,10 +13,15 @@
 #define BACKEND_BASE_URL "https://sol-bridge.onrender.com"
 #define API_PREFIX       "/api/v1"
 
+// ===== NTP Config =====
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 0;           // UTC offset in seconds (0 for UTC)
+const int   daylightOffset_sec = 0;      // Daylight saving time offset
+
 // ===== Device Identity =====
 // Get this device_id from the app after registering your device
 // Format: solar_meter-<user_id_prefix>-<timestamp>
-#define DEVICE_ID       "ESP32_SOLAR_001"  // TODO: Replace with device_id from app registration
+#define DEVICE_ID       "DEV_1768904594335_3h4c4dogn"  // TODO: Replace with device_id from app registration
 
 // ===== Pin Definitions =====
 #define VOLTAGE_PIN     35    // ADC1 - AC Voltage sensor
@@ -47,9 +53,42 @@ void connectWifi() {
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
+    
+    // Initialize NTP time sync
+    Serial.println("Syncing time with NTP server...");
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    
+    // Wait for time to be set
+    struct tm timeinfo;
+    int retries = 0;
+    while (!getLocalTime(&timeinfo) && retries < 10) {
+      Serial.print(".");
+      delay(1000);
+      retries++;
+    }
+    
+    if (retries < 10) {
+      Serial.println("\nTime synchronized!");
+      Serial.printf("Current time: %s", asctime(&timeinfo));
+    } else {
+      Serial.println("\nFailed to sync time, will use server time");
+    }
   } else {
     Serial.println("WiFi connection failed");
   }
+}
+
+// Get current time in ISO8601 format
+String getTimestamp() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to get time, using 1970 epoch");
+    return "1970-01-01T00:00:00Z";
+  }
+  
+  char timestamp[25];
+  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+  return String(timestamp);
 }
 
 // Read DC Voltage from solar panel (direct ADC, no divider needed for small panels)
@@ -133,8 +172,8 @@ bool postReading(float powerKW, float voltage, float current, float frequency, f
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
-  // Backend requires ISO8601 timestamp; using static UTC placeholder if no RTC/NTP
-  String timestamp = "1970-01-01T00:00:00Z";
+  // Get current timestamp from NTP
+  String timestamp = getTimestamp();
 
   String body = "{";
   body += "\"device_id\":\"" + String(DEVICE_ID) + "\",";

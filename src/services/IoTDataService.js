@@ -613,6 +613,13 @@ class IoTDataService {
   async close() {
     return new Promise((resolve) => {
       if (this.mqttClient) {
+        this.mqttClient.end(resolve);
+      } else {
+        resolve();
+      }
+    });
+  }
+
   // Get device production data (single device)
   async getDeviceProduction(deviceId, startDate, endDate, resolution = 'hourly') {
     try {
@@ -661,13 +668,6 @@ class IoTDataService {
       logger.error('Error getting combined production:', error);
       throw error;
     }
-  }
-
-        this.mqttClient.end(resolve);
-      } else {
-        resolve();
-      }
-    });
   }
 }
 
