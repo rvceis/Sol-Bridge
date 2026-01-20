@@ -65,6 +65,47 @@ const verifyPayment = asyncHandler(async (req, res) => {
   res.success(result, 'Payment verified successfully');
 });
 
+// Test mode: Complete payment without Razorpay (only in test mode)
+const testCompletePayment = asyncHandler(async (req, res) => {
+  const config = require('../config');
+  
+  if (!config.payment?.testMode) {
+    return res.error('ForbiddenError', 'Test mode is not enabled', 403);
+  }
+
+  const { order_id } = req.body;
+
+  if (!order_id) {
+    return res.error('ValidationError', 'order_id is required', 400);
+  }
+
+  // Generate test payment ID
+  const testPaymentId = `test_pay_${Date.now()}`;
+  const testSignature = 'test_signature_valid';
+
+  logger.info({
+    action: 'test_payment_completed',
+    userId: req.user.id,
+    orderId: order_id,
+    mode: 'TEST',
+  });
+
+  // Process as successful payment
+  const result = await PaymentService.handlePaymentSuccess(
+    order_id,
+    testPaymentId,
+    testSignature
+  );
+
+  res.success({
+    ...result,
+    test_mode: true,
+    razorpay_payment_id: testPaymentId,
+    razorpay_order_id: order_id,
+    razorpay_signature: testSignature,
+  }, 'Test payment completed successfully');
+});
+
 // Razorpay webhook handler
 const handleWebhook = asyncHandler(async (req, res) => {
   const event = req.body;
@@ -185,19 +226,29 @@ const getPaymentById = asyncHandler(async (req, res) => {
 
 // Get Razorpay key (public key for frontend)
 const getRazorpayKey = asyncHandler(async (req, res) => {
+  const config = require('../config');
   const keyId = process.env.RAZORPAY_KEY_ID;
+
+  // Return test mode status
+  if (config.payment?.testMode) {
+    return res.success({ 
+      key_id: 'test_key', 
+      test_mode: true 
+    }, 'Test mode enabled - No real payment required');
+  }
 
   if (!keyId) {
     return res.error('ConfigurationError', 'Payment gateway not configured', 503);
   }
 
-  res.success({ key_id: keyId }, 'Razorpay key retrieved');
+  res.success({ key_id: keyId, test_mode: false }, 'Razorpay key retrieved');
 });
 
 module.exports = {
   createTopupOrder,
   createEnergyPaymentOrder,
   verifyPayment,
+  testCompletePayment,
   handleWebhook,
   processRefund,
   getPaymentHistory,

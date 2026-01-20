@@ -66,6 +66,9 @@ module.exports = {
   },
 
   // Payment Gateway
+  payment: {
+    testMode: process.env.PAYMENT_TEST_MODE === 'true', // Skip real payments in test mode
+  },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID,
     keySecret: process.env.RAZORPAY_KEY_SECRET,

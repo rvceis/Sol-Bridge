@@ -11,9 +11,13 @@ const config = require('../config');
 
 class PaymentService {
   constructor() {
-    // Initialize Razorpay (will be null if keys not provided)
+    this.testMode = config.payment?.testMode || false;
+    
+    // Initialize Razorpay (will be null if keys not provided or in test mode)
     this.razorpay = null;
-    if (config.razorpay?.keyId && config.razorpay?.keySecret) {
+    if (this.testMode) {
+      logger.info('💳 PAYMENT TEST MODE ENABLED - Skipping real payments');
+    } else if (config.razorpay?.keyId && config.razorpay?.keySecret) {
       this.razorpay = new Razorpay({
         key_id: config.razorpay.keyId,
         key_secret: config.razorpay.keySecret,
@@ -29,11 +33,7 @@ class PaymentService {
    */
   async createTopupOrder(userId, amount, currency = 'INR') {
     try {
-      if (!this.razorpay) {
-        throw new Error('Payment gateway not configured');
-      }
-
-      // Minimum amount check (Razorpay requires minimum 1 INR = 100 paise)
+      // Minimum amount check
       if (amount < 1) {
         throw new Error('Minimum top-up amount is ₹1');
       }
@@ -42,7 +42,41 @@ class PaymentService {
       const paymentId = uuidv4();
       const amountInPaise = Math.round(amount * 100); // Convert to paise
 
-      // Create Razorpay order
+      // TEST MODE: Create mock order
+      if (this.testMode) {
+        const mockOrderId = `test_order_${Date.now()}`;
+        
+        await db.query(`
+          INSERT INTO payments (
+            id, user_id, amount, currency, payment_type, status,
+            gateway, gateway_order_id, metadata
+          ) VALUES ($1, $2, $3, $4, 'wallet_topup', 'pending', 'test', $5, $6)
+        `, [
+          paymentId,
+          userId,
+          amount,
+          currency,
+          mockOrderId,
+          JSON.stringify({ test_mode: true, created_at: new Date().toISOString() }),
+        ]);
+
+        logger.info({ action: 'test_payment_created', userId, amount, orderId: mockOrderId });
+
+        return {
+          payment_id: paymentId,
+          order_id: mockOrderId,
+          amount: amount,
+          currency: currency,
+          key_id: 'test_key',
+          test_mode: true,
+        };
+      }
+
+      // PRODUCTION MODE: Create real Razorpay order
+      if (!this.razorpay) {
+        throw new Error('Payment gateway not configured');
+      }
+
       const razorpayOrder = await this.razorpay.orders.create({
         amount: amountInPaise,
         currency: currency,
@@ -143,6 +177,12 @@ class PaymentService {
    */
   verifyPaymentSignature(orderId, paymentId, signature) {
     try {
+      // Test mode: always valid
+      if (this.testMode || orderId.startsWith('test_order_')) {
+        logger.info('Test mode: Skipping signature verification');
+        return true;
+      }
+
       const generatedSignature = crypto
         .createHmac('sha256', config.razorpay.keySecret)
         .update(`${orderId}|${paymentId}`)

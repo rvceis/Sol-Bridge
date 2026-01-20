@@ -19,6 +19,9 @@ router.post('/energy/create-order', PaymentController.createEnergyPaymentOrder);
 // Verify payment
 router.post('/verify', PaymentController.verifyPayment);
 
+// Test mode: Simulate payment success (only works in test mode)
+router.post('/test/complete-payment', PaymentController.testCompletePayment);
+
 // Refunds
 router.post('/refund', PaymentController.processRefund);
 
