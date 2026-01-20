@@ -98,14 +98,6 @@ const ingestData = asyncHandler(async (req, res) => {
     });
   }
 });
-  // Invalidate user's reading cache when new data arrives
-  await cacheDel(`iot:latest:${data.user_id}`);
-
-  res.json({
-    status: 'accepted',
-    timestamp: new Date().toISOString(),
-  });
-});
 
 // Get latest reading - uses authenticated user's ID (with Redis caching)
 const getLatestReading = asyncHandler(async (req, res) => {
