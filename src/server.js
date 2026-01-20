@@ -17,6 +17,7 @@ const { redis, redisAvailable } = require('./utils/cache');
 // Routes
 const authRoutes = require('./routes/authRoutes');
 const iotRoutes = require('./routes/iotRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const marketplaceRoutes = require('./routes/marketplaceRoutes');
@@ -102,6 +103,7 @@ app.get('/health', async (req, res) => {
 app.use(`/api/${config.apiVersion}`, authRoutes);
 app.use(`/api/${config.apiVersion}/devices`, deviceRoutes); // Mount specific route BEFORE general routes
 app.use(`/api/${config.apiVersion}`, iotRoutes);
+app.use(`/api/${config.apiVersion}`, aiRoutes);
 app.use(`/api/${config.apiVersion}`, transactionRoutes);
 app.use(`/api/${config.apiVersion}/users`, profileRoutes);
 app.use(`/api/${config.apiVersion}/marketplace`, marketplaceRoutes);

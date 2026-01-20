@@ -52,6 +52,18 @@ const ingestData = asyncHandler(async (req, res) => {
   // Store directly in database - bypass all other validation
   try {
     const measurements = data.measurements;
+    
+    // Calculate power from voltage and current if not provided
+    let powerKw = parseFloat(measurements.power_kw) || 0;
+    if (powerKw === 0 && measurements.voltage && measurements.current) {
+      // P(W) = V × I, convert to kW
+      powerKw = (measurements.voltage * measurements.current) / 1000;
+      logger.info(`Calculated power: ${powerKw} kW from V:${measurements.voltage}V × I:${measurements.current}A`);
+    }
+    
+    // For small installations, store energy in Wh instead of kWh for better precision
+    const energyKwh = parseFloat(measurements.energy_kwh) || 0;
+    
     await db.query(
       `INSERT INTO energy_readings 
        (time, device_id, user_id, measurement_type, power_kw, energy_kwh, voltage, current, 
@@ -62,8 +74,8 @@ const ingestData = asyncHandler(async (req, res) => {
         data.device_id,
         data.user_id,
         'solar',
-        measurements.power_kw || 0,
-        measurements.energy_kwh || 0,
+        powerKw,
+        energyKwh,
         measurements.voltage || 0,
         measurements.current || 0,
         measurements.frequency || 0,
@@ -72,7 +84,10 @@ const ingestData = asyncHandler(async (req, res) => {
         measurements.battery_voltage || null,
         measurements.battery_current || null,
         measurements.temperature || null,
-        JSON.stringify({}),
+        JSON.stringify({
+          source: 'esp32_solar_sensor',
+          calculated_power: powerKw > 0 && !measurements.power_kw,
+        }),
       ]
     );
     
@@ -82,7 +97,7 @@ const ingestData = asyncHandler(async (req, res) => {
       [data.device_id]
     );
     
-    logger.info(`✅ Data stored successfully for device ${data.device_id}`);
+    logger.info(`✅ Data stored: Power=${powerKw}kW, V=${measurements.voltage}V, I=${measurements.current}A`);
     
     res.json({
       status: 'accepted',
@@ -373,10 +388,13 @@ const getDeviceProduction = asyncHandler(async (req, res) => {
       });
     }
     
-    const totalGeneration = parseFloat(readings.reduce((sum, r) => sum + (parseFloat(r.total_energy) || 0), 0).toFixed(2));
-    const avgPower = readings.length > 0 ? parseFloat((readings.reduce((sum, r) => sum + (parseFloat(r.avg_power) || 0), 0) / readings.length).toFixed(2)) : 0;
-    const maxPower = readings.length > 0 ? parseFloat(Math.max(...readings.map(r => parseFloat(r.max_power) || 0)).toFixed(2)) : 0;
+    const totalGeneration = parseFloat(readings.reduce((sum, r) => sum + (parseFloat(r.total_energy) || 0), 0).toFixed(4));
+    const avgPower = readings.length > 0 ? parseFloat((readings.reduce((sum, r) => sum + (parseFloat(r.avg_power) || 0), 0) / readings.length).toFixed(4)) : 0;
+    const maxPower = readings.length > 0 ? parseFloat(Math.max(...readings.map(r => parseFloat(r.max_power) || 0)).toFixed(4)) : 0;
 
+    // For small values, convert to Wh and W for better readability
+    const isSmallScale = maxPower < 0.1; // Less than 100W
+    
     res.json({
       success: true,
       data: {
@@ -384,9 +402,13 @@ const getDeviceProduction = asyncHandler(async (req, res) => {
         readings: readings,
         summary: {
           total_energy_kwh: totalGeneration,
+          total_energy_wh: isSmallScale ? totalGeneration * 1000 : null, // Show Wh if small
           avg_power_kw: avgPower,
+          avg_power_w: isSmallScale ? avgPower * 1000 : null, // Show W if small
           max_power_kw: maxPower,
+          max_power_w: isSmallScale ? maxPower * 1000 : null, // Show W if small
           reading_count: readings.length,
+          scale: isSmallScale ? 'watts' : 'kilowatts',
         },
         period: {
           start: start.toISOString(),
@@ -456,6 +478,9 @@ const getCombinedProduction = asyncHandler(async (req, res) => {
       [userId]
     );
 
+    // For small values, convert to Wh and W for better readability
+    const isSmallScale = maxPower < 0.1; // Less than 100W
+
     res.json({
       success: true,
       data: {
@@ -465,9 +490,13 @@ const getCombinedProduction = asyncHandler(async (req, res) => {
         readings: readings,
         summary: {
           total_energy_kwh: totalGeneration,
+          total_energy_wh: isSmallScale ? totalGeneration * 1000 : null,
           avg_power_kw: avgPower,
+          avg_power_w: isSmallScale ? avgPower * 1000 : null,
           max_power_kw: maxPower,
+          max_power_w: isSmallScale ? maxPower * 1000 : null,
           reading_count: readings.length,
+          scale: isSmallScale ? 'watts' : 'kilowatts',
         },
         period: {
           start: start.toISOString(),

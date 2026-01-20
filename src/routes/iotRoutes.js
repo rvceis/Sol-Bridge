@@ -194,4 +194,88 @@ router.get('/iot/production/device/:deviceId', authenticate, (req, res, next) =>
  */
 router.get('/iot/production/combined', authenticate, (req, res, next) => iotController.getCombinedProduction(req, res, next));
 
+/**
+ * GET /api/weather/solar-radiation - Get solar radiation at user's device location (daytime only)
+ */
+router.get('/weather/solar-radiation', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const now = new Date();
+    const hour = now.getHours();
+
+    // Only return solar radiation during daytime (6 AM - 6 PM)
+    if (hour < 6 || hour > 18) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'Solar radiation data only available during daytime (6 AM - 6 PM)',
+      });
+    }
+
+    // Get user's primary device location
+    const deviceRes = await db.query(
+      `SELECT location FROM devices WHERE user_id = $1 LIMIT 1`,
+      [userId]
+    );
+
+    if (!deviceRes.rows.length) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'No device with location found',
+      });
+    }
+
+    const location = deviceRes.rows[0].location;
+    if (!location || !location.lat || !location.lon) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'Device location not set',
+      });
+    }
+
+    // Call OpenWeather API for solar radiation
+    const openWeatherKey = process.env.OPENWEATHER_API_KEY;
+    if (!openWeatherKey) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'Weather service not configured',
+      });
+    }
+
+    const fetch = (await import('node-fetch')).default;
+    const weatherRes = await fetch(
+      `https://api.openweathermap.org/data/3.0/stations?lat=${location.lat}&lon=${location.lon}&appid=${openWeatherKey}`
+    );
+    
+    if (!weatherRes.ok) {
+      throw new Error('Weather API failed');
+    }
+
+    const weatherData = await weatherRes.json();
+
+    res.json({
+      success: true,
+      data: {
+        uvi: weatherData.uvi || 0,
+        radiation_watts: Math.round((weatherData.uvi || 0) * 100), // Rough approximation
+        timestamp: new Date().toISOString(),
+        location: {
+          lat: location.lat,
+          lon: location.lon,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Solar radiation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'WeatherServiceError',
+      message: error.message,
+    });
+  }
+});
+
 module.exports = router;
