@@ -8,8 +8,11 @@ const ingestData = asyncHandler(async (req, res) => {
   // Allow both old format (with user_id) and new format (device_id only)
   let data = req.body;
   
-  // If user_id not provided, look it up from device_id
-  if (!data.user_id && data.device_id) {
+  // Check if user_id exists and is a valid UUID format
+  const isValidUUID = data.user_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.user_id);
+  
+  // If user_id not provided or not a valid UUID, look it up from device_id
+  if (!isValidUUID && data.device_id) {
     const device = await iotService.getDeviceByIdOnly(data.device_id);
     if (!device) {
       return res.status(404).json({
