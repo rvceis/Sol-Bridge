@@ -134,27 +134,23 @@ class IoTDataService {
 
       // Validate timestamp
       const timestamp = new Date(data.timestamp);
-      if (isNaN(timestamp.getTime())) {
-        return {
-          valid: false,
-          error: 'Invalid timestamp format',
-        };
+      let useServerTime = false;
+      
+      // If timestamp is invalid or too old (before 2020), use server time
+      if (isNaN(timestamp.getTime()) || timestamp.getFullYear() < 2020) {
+        useServerTime = true;
+        logger.warn(`Invalid or old timestamp from device ${data.device_id}, using server time`);
       }
 
       // Check for future timestamp (allow 5 min drift)
-      if (timestamp > new Date(Date.now() + 5 * 60 * 1000)) {
-        return {
-          valid: false,
-          error: 'Timestamp is in the future',
-        };
+      if (!useServerTime && timestamp > new Date(Date.now() + 5 * 60 * 1000)) {
+        logger.warn(`Future timestamp from device ${data.device_id}, using server time`);
+        useServerTime = true;
       }
 
-      // Check for old data (> 1 hour)
-      if (timestamp < new Date(Date.now() - 60 * 60 * 1000)) {
-        return {
-          valid: false,
-          error: 'Data is too old',
-        };
+      // Use server time if needed
+      if (useServerTime) {
+        data.timestamp = new Date().toISOString();
       }
 
       // Verify device exists and belongs to user
