@@ -100,18 +100,21 @@ const schemas = {
   iotData: Joi.object({
     device_id: Joi.string().required(),
     user_id: Joi.string().uuid().required(),
-    timestamp: Joi.date().required(),
+    timestamp: Joi.alternatives().try(
+      Joi.date(),
+      Joi.string().isoDate()
+    ).required(),
     measurements: Joi.object({
-      power_kw: Joi.number().min(0),
-      energy_kwh: Joi.number().min(0),
-      voltage: Joi.number(),
-      current: Joi.number(),
-      frequency: Joi.number(),
-      power_factor: Joi.number(),
-      battery_soc: Joi.number().min(0).max(100),
-      temperature: Joi.number(),
-    }).required(),
-  }),
+      power_kw: Joi.number().min(0).allow(null),
+      energy_kwh: Joi.number().min(0).allow(null),
+      voltage: Joi.number().allow(null),
+      current: Joi.number().allow(null),
+      frequency: Joi.number().allow(null),
+      power_factor: Joi.number().allow(null),
+      battery_soc: Joi.number().min(0).max(100).allow(null),
+      temperature: Joi.number().allow(null),
+    }).required().unknown(true),
+  }).unknown(true),
 
   deviceRegistration: Joi.object({
     device_id: Joi.string().required(),

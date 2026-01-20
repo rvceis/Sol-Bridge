@@ -218,16 +218,15 @@ class IoTDataService {
         }
       }
 
-      if (measurements.temperature !== undefined) {
+      if (measurements.temperature !== undefined && measurements.temperature !== null) {
+        // Allow wide range but warn on extremes, don't reject
         if (measurements.temperature < -50 || measurements.temperature > 150) {
-          logger.warn(`Temperature out of range: ${measurements.temperature}°C from device ${data.device_id}`);
-          return {
-            valid: false,
-            error: `Temperature out of range (-50 to 150°C), got ${measurements.temperature}`,
-          };
+          logger.warn(`Temperature seems abnormal: ${measurements.temperature}°C from device ${data.device_id}, but accepting it`);
         }
       }
 
+      // Accept all valid data
+      logger.info(`Validation passed for device ${data.device_id}`);
       return { valid: true };
     } catch (error) {
       logger.error('Validation error:', error);
