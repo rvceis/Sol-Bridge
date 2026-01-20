@@ -17,6 +17,7 @@ const ingestData = asyncHandler(async (req, res) => {
   if (!isValidUUID && data.device_id) {
     const device = await iotService.getDeviceByIdOnly(data.device_id);
     if (!device) {
+      logger.error(`Device not found: ${data.device_id}`);
       return res.status(404).json({
         success: false,
         error: 'DeviceNotFound',
@@ -24,10 +25,17 @@ const ingestData = asyncHandler(async (req, res) => {
       });
     }
     data.user_id = device.user_id;
+    logger.info(`Device ${data.device_id} resolved to user ${device.user_id}`);
   }
   
   // Validate complete data
-  data = validate(data, schemas.iotData);
+  try {
+    data = validate(data, schemas.iotData);
+  } catch (validationError) {
+    logger.error('Validation failed:', validationError.message);
+    logger.error('Data received:', JSON.stringify(data));
+    throw validationError;
+  }
   
   await iotService.handleMessage(
     `energy/${data.user_id}/device/reading`,
