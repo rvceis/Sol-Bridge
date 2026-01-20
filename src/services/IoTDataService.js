@@ -178,37 +178,52 @@ class IoTDataService {
       const measurements = data.measurements;
 
       if (measurements.power_kw !== undefined) {
-        if (measurements.power_kw < 0 || measurements.power_kw > 100) {
+        if (measurements.power_kw < 0 || measurements.power_kw > 1000) {
+          logger.warn(`Power out of range: ${measurements.power_kw} kW from device ${data.device_id}`);
           return {
             valid: false,
-            error: 'Power out of acceptable range (0-100 kW)',
+            error: `Power out of acceptable range (0-1000 kW), got ${measurements.power_kw}`,
           };
         }
       }
 
       if (measurements.voltage !== undefined) {
-        if (measurements.voltage < 200 || measurements.voltage > 260) {
+        // Allow both AC (200-260V) and DC (0-100V) voltages
+        if (measurements.voltage < 0 || measurements.voltage > 500) {
+          logger.warn(`Voltage out of range: ${measurements.voltage}V from device ${data.device_id}`);
           return {
             valid: false,
-            error: 'Voltage out of range (200-260V)',
+            error: `Voltage out of range (0-500V), got ${measurements.voltage}`,
           };
         }
       }
 
       if (measurements.current !== undefined) {
-        if (measurements.current < 0 || measurements.current > 100) {
+        if (measurements.current < 0 || measurements.current > 200) {
+          logger.warn(`Current out of range: ${measurements.current}A from device ${data.device_id}`);
           return {
             valid: false,
-            error: 'Current out of range (0-100A)',
+            error: `Current out of range (0-200A), got ${measurements.current}`,
           };
         }
       }
 
       if (measurements.battery_soc !== undefined) {
         if (measurements.battery_soc < 0 || measurements.battery_soc > 100) {
+          logger.warn(`Battery SOC out of range: ${measurements.battery_soc}% from device ${data.device_id}`);
           return {
             valid: false,
-            error: 'Battery SOC out of range (0-100%)',
+            error: `Battery SOC out of range (0-100%), got ${measurements.battery_soc}`,
+          };
+        }
+      }
+
+      if (measurements.temperature !== undefined) {
+        if (measurements.temperature < -50 || measurements.temperature > 150) {
+          logger.warn(`Temperature out of range: ${measurements.temperature}°C from device ${data.device_id}`);
+          return {
+            valid: false,
+            error: `Temperature out of range (-50 to 150°C), got ${measurements.temperature}`,
           };
         }
       }
