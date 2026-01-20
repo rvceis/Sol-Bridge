@@ -232,6 +232,79 @@ exports.getAllDevicesWeather = async (req, res) => {
 };
 
 /**
+ * Get current solar radiation (daytime only) for user's first device
+ */
+exports.getSolarRadiation = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const now = new Date();
+    const hour = now.getHours();
+    if (hour < 6 || hour > 18) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'Solar radiation data is available during daytime (6 AM - 6 PM)',
+      });
+    }
+
+    const deviceQuery = await db.query(
+      `SELECT device_id, device_name, latitude, longitude, location 
+       FROM devices 
+       WHERE user_id = $1 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (deviceQuery.rows.length === 0) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'No devices with location found',
+      });
+    }
+
+    const device = deviceQuery.rows[0];
+    const loc = device.location || {};
+    const lat = device.latitude || loc.lat || loc.latitude;
+    const lon = device.longitude || loc.lon || loc.longitude;
+
+    if (!lat || !lon) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'Device location not set',
+      });
+    }
+
+    // Use solar forecast as proxy for current radiation
+    const forecast = await weatherService.getSolarForecast(lat, lon, 1);
+    const entry = Array.isArray(forecast) ? forecast[0] : forecast;
+    const radiation = entry?.ghi || entry?.radiation || entry?.solar_irradiance || entry?.dni || 0;
+    const uvi = entry?.uvi || entry?.uv || 0;
+
+    res.json({
+      success: true,
+      data: {
+        device_id: device.device_id || device.id,
+        device_name: device.device_name || device.name,
+        location: { lat, lon },
+        radiation_watts: Math.max(0, Number(radiation) || 0),
+        uvi: Math.max(0, Number(uvi) || 0),
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    logger.error('Error fetching solar radiation:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch solar radiation',
+    });
+  }
+};
+
+/**
  * Get solar forecast for device
  */
 exports.getDeviceSolarForecast = async (req, res) => {

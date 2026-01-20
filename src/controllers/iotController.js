@@ -7,6 +7,113 @@ const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 
 // Ingest IoT data - Simplified for ESP32 compatibility
 const ingestData = asyncHandler(async (req, res) => {
+  let data = req.body;
+  
+  logger.info(`IoT Ingest received: ${JSON.stringify(data)}`);
+  
+  // Look up device to get user_id
+  if (!data.device_id) {
+    return res.status(400).json({
+      success: false,
+      error: 'ValidationError',
+      message: 'device_id is required',
+    });
+  }
+  
+  const device = await iotService.getDeviceByIdOnly(data.device_id);
+  if (!device) {
+    logger.error(`Device not found: ${data.device_id}`);
+    return res.status(404).json({
+      success: false,
+      error: 'DeviceNotFound',
+      message: 'Device not registered. Please register device through the app first.',
+    });
+  }
+  
+  data.user_id = device.user_id;
+  logger.info(`Device ${data.device_id} belongs to user ${device.user_id}`);
+  
+  // Fix timestamp if invalid (1970 or future)
+  const timestamp = new Date(data.timestamp);
+  if (isNaN(timestamp.getTime()) || timestamp.getFullYear() < 2020) {
+    data.timestamp = new Date().toISOString();
+    logger.info(`Fixed invalid timestamp, using server time: ${data.timestamp}`);
+  }
+  
+  // Ensure measurements exist
+  if (!data.measurements) {
+    return res.status(400).json({
+      success: false,
+      error: 'ValidationError',
+      message: 'measurements object is required',
+    });
+  }
+  
+  // Store directly in database - bypass all other validation
+  try {
+    const measurements = data.measurements;
+    
+    // Calculate power from voltage and current if not provided
+    let powerKw = parseFloat(measurements.power_kw) || 0;
+    if (powerKw === 0 && measurements.voltage && measurements.current) {
+      // P(W) = V × I, convert to kW
+      powerKw = (measurements.voltage * measurements.current) / 1000;
+      logger.info(`Calculated power: ${powerKw} kW from V:${measurements.voltage}V × I:${measurements.current}A`);
+    }
+    
+    // For small installations, store energy in Wh instead of kWh for better precision
+    const energyKwh = parseFloat(measurements.energy_kwh) || 0;
+    
+    await db.query(
+      `INSERT INTO energy_readings 
+       (time, device_id, user_id, measurement_type, power_kw, energy_kwh, voltage, current, 
+        frequency, power_factor, battery_soc, battery_voltage, battery_current, temperature, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      [
+        data.timestamp,
+        data.device_id,
+        data.user_id,
+        'solar',
+        powerKw,
+        energyKwh,
+        measurements.voltage || 0,
+        measurements.current || 0,
+        measurements.frequency || 0,
+        measurements.power_factor || null,
+        measurements.battery_soc || null,
+        measurements.battery_voltage || null,
+        measurements.battery_current || null,
+        measurements.temperature || null,
+        JSON.stringify({
+          source: 'esp32_solar_sensor',
+          calculated_power: powerKw > 0 && !measurements.power_kw,
+        }),
+      ]
+    );
+    
+    // Update device last_seen
+    await db.query(
+      `UPDATE devices SET last_seen_at = NOW(), status = 'active' WHERE device_id = $1`,
+      [data.device_id]
+    );
+    
+    logger.info(`✅ Data stored: Power=${powerKw}kW, V=${measurements.voltage}V, I=${measurements.current}A`);
+    
+    res.json({
+      status: 'accepted',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (dbError) {
+    logger.error(`Database error storing IoT data: ${dbError.message}`);
+    logger.error('Stack:', dbError.stack);
+    res.status(500).json({
+      success: false,
+      error: 'DatabaseError',
+      message: dbError.message,
+    });
+  }
+});
+
 // Get latest reading for a specific device
 const getDeviceLatestReading = asyncHandler(async (req, res) => {
   const userId = req.user?.id;
@@ -73,6 +180,7 @@ const getDeviceLatestReading = asyncHandler(async (req, res) => {
     },
   });
 });
+// Ingest IoT data - Simplified for ESP32 compatibility
   let data = req.body;
   
   logger.info(`IoT Ingest received: ${JSON.stringify(data)}`);
