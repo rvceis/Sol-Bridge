@@ -109,6 +109,7 @@ const schemas = {
       frequency: Joi.number(),
       power_factor: Joi.number(),
       battery_soc: Joi.number().min(0).max(100),
+      temperature: Joi.number(),
     }).required(),
   }),
 

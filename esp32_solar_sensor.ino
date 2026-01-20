@@ -21,7 +21,7 @@ const int   daylightOffset_sec = 0;      // Daylight saving time offset
 // ===== Device Identity =====
 // Get this device_id from the app after registering your device
 // Format: solar_meter-<user_id_prefix>-<timestamp>
-#define DEVICE_ID       "DEV_1768904594335_3h4c4dogn"  // TODO: Replace with device_id from app registration
+#define DEVICE_ID       "DEV_1768907558141_b6yddsd4k"  // TODO: Replace with device_id from app registration
 
 // ===== Pin Definitions =====
 #define VOLTAGE_PIN     35    // ADC1 - AC Voltage sensor
