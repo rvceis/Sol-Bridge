@@ -24,4 +24,7 @@ router.get('/transactions', MarketplaceController.getMyTransactions);
 router.get('/transactions/:id', MarketplaceController.getTransactionById);
 router.put('/transactions/:id', MarketplaceController.updateTransactionStatus);
 
+// AI Matching
+router.get('/ai-matches', MarketplaceController.getAIMatches);
+
 module.exports = router;

@@ -536,6 +536,174 @@ class MarketplaceService {
       throw error;
     }
   }
+
+  // Get user preferences for AI matching
+  async getUserPreferences(userId) {
+    try {
+      const result = await db.query(`
+        SELECT 
+          u.id,
+          u.role,
+          u.full_name,
+          COALESCE(AVG(t.energy_amount_kwh), 0) as avg_energy_kwh,
+          COALESCE(AVG(t.price_per_kwh), 0) as preferred_price,
+          COUNT(t.id) as transaction_count
+        FROM users u
+        LEFT JOIN energy_transactions t ON u.id = t.buyer_id OR u.id = t.seller_id
+        WHERE u.id = $1
+        GROUP BY u.id, u.role, u.full_name
+      `, [userId]);
+
+      return result.rows[0] || { id: userId, transaction_count: 0 };
+    } catch (error) {
+      logger.error('Error getting user preferences:', error);
+      return { id: userId, transaction_count: 0 };
+    }
+  }
+
+  // Fallback matching when ML service unavailable
+  async getFallbackMatches(userId, userRole) {
+    try {
+      // Get user's location if available
+      const userQuery = await db.query(
+        'SELECT latitude, longitude FROM users WHERE id = $1',
+        [userId]
+      );
+
+      const userLocation = userQuery.rows[0];
+
+      let matches = [];
+
+      if (userRole === 'buyer') {
+        // Find sellers with active listings
+        const result = await db.query(`
+          SELECT 
+            u.id as partner_id,
+            u.full_name as partner_name,
+            u.city || ', ' || u.state as partner_location,
+            l.id as listing_id,
+            l.energy_amount_kwh as estimated_energy_kwh,
+            l.price_per_kwh as suggested_price,
+            COALESCE(
+              ST_Distance(
+                ST_MakePoint($2, $3)::geography,
+                ST_MakePoint(u.longitude, u.latitude)::geography
+              ) / 1000, 
+              10
+            ) as distance_km,
+            COUNT(t.id) as transaction_count
+          FROM users u
+          INNER JOIN energy_listings l ON u.id = l.seller_id
+          LEFT JOIN energy_transactions t ON u.id = t.seller_id AND t.status = 'completed'
+          WHERE u.role = 'host' 
+            AND l.status = 'active'
+            AND u.id != $1
+          GROUP BY u.id, u.full_name, u.city, u.state, l.id, l.energy_amount_kwh, l.price_per_kwh, u.longitude, u.latitude
+          ORDER BY distance_km ASC
+          LIMIT 10
+        `, [userId, userLocation?.longitude || 77.2090, userLocation?.latitude || 28.6139]);
+
+        matches = result.rows.map(row => ({
+          id: row.listing_id,
+          match_type: 'seller',
+          partner_id: row.partner_id,
+          partner_name: row.partner_name,
+          partner_location: row.partner_location,
+          overall_score: this.calculateFallbackScore(row),
+          match_breakdown: {
+            distance_score: Math.max(0, 100 - (row.distance_km * 2)),
+            price_compatibility: 85,
+            energy_needs_alignment: 80,
+            timing_compatibility: 75,
+            reliability_score: Math.min(100, 70 + (row.transaction_count * 5)),
+          },
+          potential_savings: Math.round(row.suggested_price * row.estimated_energy_kwh * 0.15 * 30),
+          estimated_energy_kwh: parseFloat(row.estimated_energy_kwh),
+          distance_km: parseFloat(row.distance_km),
+          suggested_price: parseFloat(row.suggested_price),
+          compatibility_label: this.getCompatibilityLabel(this.calculateFallbackScore(row)),
+          recommendation: this.getRecommendation(row),
+          matched_at: new Date().toISOString(),
+        }));
+      } else {
+        // Find buyers (sellers looking for buyers)
+        const result = await db.query(`
+          SELECT 
+            u.id as partner_id,
+            u.full_name as partner_name,
+            u.city || ', ' || u.state as partner_location,
+            COALESCE(AVG(t.energy_amount_kwh), 50) as estimated_energy_kwh,
+            COALESCE(AVG(t.price_per_kwh), 7.0) as suggested_price,
+            COALESCE(
+              ST_Distance(
+                ST_MakePoint($2, $3)::geography,
+                ST_MakePoint(u.longitude, u.latitude)::geography
+              ) / 1000, 
+              10
+            ) as distance_km,
+            COUNT(t.id) as transaction_count
+          FROM users u
+          LEFT JOIN energy_transactions t ON u.id = t.buyer_id AND t.status = 'completed'
+          WHERE u.role = 'buyer'
+            AND u.id != $1
+          GROUP BY u.id, u.full_name, u.city, u.state, u.longitude, u.latitude
+          ORDER BY distance_km ASC
+          LIMIT 10
+        `, [userId, userLocation?.longitude || 77.2090, userLocation?.latitude || 28.6139]);
+
+        matches = result.rows.map(row => ({
+          id: row.partner_id,
+          match_type: 'buyer',
+          partner_id: row.partner_id,
+          partner_name: row.partner_name,
+          partner_location: row.partner_location,
+          overall_score: this.calculateFallbackScore(row),
+          match_breakdown: {
+            distance_score: Math.max(0, 100 - (row.distance_km * 2)),
+            price_compatibility: 85,
+            energy_needs_alignment: 80,
+            timing_compatibility: 75,
+            reliability_score: Math.min(100, 70 + (row.transaction_count * 5)),
+          },
+          potential_savings: Math.round(row.suggested_price * row.estimated_energy_kwh * 0.15 * 30),
+          estimated_energy_kwh: parseFloat(row.estimated_energy_kwh),
+          distance_km: parseFloat(row.distance_km),
+          suggested_price: parseFloat(row.suggested_price),
+          compatibility_label: this.getCompatibilityLabel(this.calculateFallbackScore(row)),
+          recommendation: this.getRecommendation(row),
+          matched_at: new Date().toISOString(),
+        }));
+      }
+
+      return matches;
+    } catch (error) {
+      logger.error('Error getting fallback matches:', error);
+      return [];
+    }
+  }
+
+  calculateFallbackScore(row) {
+    const distanceScore = Math.max(0, 100 - (row.distance_km * 2));
+    const reliabilityScore = Math.min(100, 70 + (row.transaction_count * 5));
+    return Math.round((distanceScore * 0.4 + reliabilityScore * 0.3 + 80 * 0.3));
+  }
+
+  getCompatibilityLabel(score) {
+    if (score >= 90) return 'Excellent Match';
+    if (score >= 80) return 'Great Match';
+    if (score >= 70) return 'Good Match';
+    return 'Fair Match';
+  }
+
+  getRecommendation(row) {
+    if (row.distance_km < 5) {
+      return 'Highly recommended - Close proximity and excellent energy alignment';
+    } else if (row.distance_km < 10) {
+      return 'Good option - Competitive pricing and reliable supply';
+    } else {
+      return 'Consider this option - Moderate distance but good energy alignment';
+    }
+  }
 }
 
 module.exports = new MarketplaceService();

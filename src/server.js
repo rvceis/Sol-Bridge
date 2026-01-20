@@ -35,6 +35,7 @@ const registrationRoutes = require('./routes/registrationRoutes');
 const reportsRoutes = require('./routes/reportsRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const energySourceRoutes = require('./routes/energySourceRoutes');
+const weatherRoutes = require('./routes/weatherRoutes');
 
 // Services
 const iotService = require('./services/IoTDataService');
@@ -119,6 +120,7 @@ app.use(`/api/${config.apiVersion}/industry`, registrationRoutes);
 app.use(`/api/${config.apiVersion}/reports`, reportsRoutes);
 app.use(`/api/${config.apiVersion}/report`, reportRoutes);
 app.use(`/api/${config.apiVersion}/energy-sources`, energySourceRoutes);
+app.use(`/api/${config.apiVersion}/weather`, weatherRoutes);
 
 // ===== 404 Handler =====
 app.use((req, res) => {

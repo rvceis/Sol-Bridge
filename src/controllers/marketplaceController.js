@@ -386,6 +386,68 @@ class MarketplaceController {
       });
     }
   }
+
+  // Get AI-powered matches for a user
+  async getAIMatches(req, res) {
+    try {
+      const userId = req.user.id;
+      const userRole = req.user.role || 'buyer';
+      
+      // Get user's preferences and history
+      const userPreferences = await MarketplaceService.getUserPreferences(userId);
+      
+      // Call ML service for AI matching
+      const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://localhost:8001';
+      
+      try {
+        const axios = require('axios');
+        const mlResponse = await axios.post(`${mlServiceUrl}/matching/find-matches`, {
+          user_id: userId,
+          user_role: userRole,
+          preferences: userPreferences,
+          max_matches: 10
+        }, {
+          timeout: 10000
+        });
+        
+        if (mlResponse.data && mlResponse.data.matches) {
+          return res.json({
+            success: true,
+            data: {
+              matches: mlResponse.data.matches,
+              recommendations: mlResponse.data.recommendations || []
+            }
+          });
+        }
+      } catch (mlError) {
+        logger.warn('ML service unavailable, using fallback matching:', mlError.message);
+      }
+      
+      // Fallback: Use rule-based matching if ML service unavailable
+      const fallbackMatches = await MarketplaceService.getFallbackMatches(userId, userRole);
+      
+      res.json({
+        success: true,
+        data: {
+          matches: fallbackMatches,
+          recommendations: [
+            {
+              type: 'tip',
+              title: 'Complete Your Profile',
+              description: 'Add more details to improve match accuracy',
+              action: 'Update Profile'
+            }
+          ]
+        }
+      });
+    } catch (error) {
+      logger.error('Error in getAIMatches:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to get AI matches'
+      });
+    }
+  }
 }
 
 module.exports = new MarketplaceController();
