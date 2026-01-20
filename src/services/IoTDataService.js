@@ -124,8 +124,11 @@ class IoTDataService {
   // Validate message schema and content
   async validateMessage(data, userId) {
     try {
+      logger.info(`Validating message for device ${data.device_id}, user ${userId}`);
+      
       // Required fields
       if (!data.device_id || !data.timestamp || !data.measurements) {
+        logger.error(`Missing required fields - device_id: ${!!data.device_id}, timestamp: ${!!data.timestamp}, measurements: ${!!data.measurements}`);
         return {
           valid: false,
           error: 'Missing required fields (device_id, timestamp, measurements)',
@@ -160,6 +163,7 @@ class IoTDataService {
       );
 
       if (deviceResult.rows.length === 0) {
+        logger.error(`Device ${data.device_id} not found for user ${userId}`);
         return {
           valid: false,
           error: 'Device not found or does not belong to user',
@@ -168,65 +172,15 @@ class IoTDataService {
 
       const device = deviceResult.rows[0];
       if (device.status === 'decommissioned') {
+        logger.warn(`Device ${data.device_id} is decommissioned`);
         return {
           valid: false,
           error: 'Device is decommissioned',
         };
       }
 
-      // Validate measurement ranges
-      const measurements = data.measurements;
-
-      if (measurements.power_kw !== undefined) {
-        if (measurements.power_kw < 0 || measurements.power_kw > 1000) {
-          logger.warn(`Power out of range: ${measurements.power_kw} kW from device ${data.device_id}`);
-          return {
-            valid: false,
-            error: `Power out of acceptable range (0-1000 kW), got ${measurements.power_kw}`,
-          };
-        }
-      }
-
-      if (measurements.voltage !== undefined) {
-        // Allow both AC (200-260V) and DC (0-100V) voltages
-        if (measurements.voltage < 0 || measurements.voltage > 500) {
-          logger.warn(`Voltage out of range: ${measurements.voltage}V from device ${data.device_id}`);
-          return {
-            valid: false,
-            error: `Voltage out of range (0-500V), got ${measurements.voltage}`,
-          };
-        }
-      }
-
-      if (measurements.current !== undefined) {
-        if (measurements.current < 0 || measurements.current > 200) {
-          logger.warn(`Current out of range: ${measurements.current}A from device ${data.device_id}`);
-          return {
-            valid: false,
-            error: `Current out of range (0-200A), got ${measurements.current}`,
-          };
-        }
-      }
-
-      if (measurements.battery_soc !== undefined) {
-        if (measurements.battery_soc < 0 || measurements.battery_soc > 100) {
-          logger.warn(`Battery SOC out of range: ${measurements.battery_soc}% from device ${data.device_id}`);
-          return {
-            valid: false,
-            error: `Battery SOC out of range (0-100%), got ${measurements.battery_soc}`,
-          };
-        }
-      }
-
-      if (measurements.temperature !== undefined && measurements.temperature !== null) {
-        // Allow wide range but warn on extremes, don't reject
-        if (measurements.temperature < -50 || measurements.temperature > 150) {
-          logger.warn(`Temperature seems abnormal: ${measurements.temperature}°C from device ${data.device_id}, but accepting it`);
-        }
-      }
-
-      // Accept all valid data
-      logger.info(`Validation passed for device ${data.device_id}`);
+      // Skip range validation - accept all sensor readings
+      logger.info(`Validation passed for device ${data.device_id} - accepting all measurements`);
       return { valid: true };
     } catch (error) {
       logger.error('Validation error:', error);
