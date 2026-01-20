@@ -259,6 +259,11 @@ const sendCommand = asyncHandler(async (req, res) => {
   res.json({
     status: 'sent',
     device_id: deviceId,
+    command,
+    value,
+  });
+});
+
 // Get device production (single device)
 const getDeviceProduction = asyncHandler(async (req, res) => {
   const userId = req.user?.id;
