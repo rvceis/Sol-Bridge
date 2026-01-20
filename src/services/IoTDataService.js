@@ -617,6 +617,56 @@ class IoTDataService {
   async close() {
     return new Promise((resolve) => {
       if (this.mqttClient) {
+  // Get device production data (single device)
+  async getDeviceProduction(deviceId, startDate, endDate, resolution = 'hourly') {
+    try {
+      let query = `
+        SELECT 
+          time_bucket('1 ${resolution}', time) as time,
+          AVG(power_kw) as avg_power,
+          MAX(power_kw) as max_power,
+          MIN(power_kw) as min_power,
+          SUM(energy_kwh) as total_energy,
+          AVG(temperature) as avg_temperature
+        FROM energy_readings
+        WHERE device_id = $1 AND time BETWEEN $2 AND $3
+        GROUP BY time_bucket('1 ${resolution}', time)
+        ORDER BY time DESC
+      `;
+
+      const result = await db.query(query, [deviceId, startDate, endDate]);
+      return result.rows || [];
+    } catch (error) {
+      logger.error('Error getting device production:', error);
+      throw error;
+    }
+  }
+
+  // Get combined production data (all devices for user)
+  async getCombinedProduction(userId, startDate, endDate, resolution = 'hourly') {
+    try {
+      let query = `
+        SELECT 
+          time_bucket('1 ${resolution}', time) as time,
+          AVG(power_kw) as avg_power,
+          MAX(power_kw) as max_power,
+          MIN(power_kw) as min_power,
+          SUM(energy_kwh) as total_energy,
+          AVG(temperature) as avg_temperature
+        FROM energy_readings
+        WHERE user_id = $1 AND time BETWEEN $2 AND $3
+        GROUP BY time_bucket('1 ${resolution}', time)
+        ORDER BY time DESC
+      `;
+
+      const result = await db.query(query, [userId, startDate, endDate]);
+      return result.rows || [];
+    } catch (error) {
+      logger.error('Error getting combined production:', error);
+      throw error;
+    }
+  }
+
         this.mqttClient.end(resolve);
       } else {
         resolve();

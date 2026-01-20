@@ -1,4 +1,6 @@
 const iotService = require('../services/IoTDataService');
+const db = require('../database');
+const logger = require('../utils/logger');
 const { asyncHandler } = require('../utils/errors');
 const { schemas, validate } = require('../utils/validation');
 const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
@@ -257,15 +259,123 @@ const sendCommand = asyncHandler(async (req, res) => {
   res.json({
     status: 'sent',
     device_id: deviceId,
-    command,
-    value,
-  });
+// Get device production (single device)
+const getDeviceProduction = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+  const { deviceId } = req.params;
+  const { startDate, endDate, interval = 'hourly' } = req.query;
+
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Login required' });
+  }
+
+  if (!deviceId) {
+    return res.status(400).json({ success: false, error: 'ValidationError', message: 'deviceId is required' });
+  }
+
+  // Verify device belongs to user
+  const deviceCheck = await db.query(
+    `SELECT device_id FROM devices WHERE device_id = $1 AND user_id = $2`,
+    [deviceId, userId]
+  );
+
+  if (deviceCheck.rows.length === 0) {
+    return res.status(404).json({ success: false, error: 'DeviceNotFound', message: 'Device not found or does not belong to you' });
+  }
+
+  // Default to today if no dates provided
+  const start = startDate ? new Date(startDate) : new Date(new Date().setHours(0, 0, 0, 0));
+  const end = endDate ? new Date(endDate) : new Date();
+
+  try {
+    const readings = await iotService.getDeviceProduction(deviceId, start, end, interval);
+    
+    const totalGeneration = readings.reduce((sum, r) => sum + (r.total_energy || 0), 0);
+    const avgPower = readings.length > 0 ? readings.reduce((sum, r) => sum + (r.avg_power || 0), 0) / readings.length : 0;
+    const maxPower = readings.length > 0 ? Math.max(...readings.map(r => r.max_power || 0)) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        device_id: deviceId,
+        readings: readings,
+        summary: {
+          total_energy_kwh: parseFloat(totalGeneration.toFixed(2)),
+          avg_power_kw: parseFloat(avgPower.toFixed(2)),
+          max_power_kw: parseFloat(maxPower.toFixed(2)),
+          reading_count: readings.length,
+        },
+        period: {
+          start: start.toISOString(),
+          end: end.toISOString(),
+          interval,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Error getting device production:', error);
+    res.status(500).json({ success: false, error: 'InternalServerError', message: error.message });
+  }
+});
+
+// Get combined production (all devices for user)
+const getCombinedProduction = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+  const { startDate, endDate, interval = 'hourly' } = req.query;
+
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Login required' });
+  }
+
+  // Default to today if no dates provided
+  const start = startDate ? new Date(startDate) : new Date(new Date().setHours(0, 0, 0, 0));
+  const end = endDate ? new Date(endDate) : new Date();
+
+  try {
+    const readings = await iotService.getCombinedProduction(userId, start, end, interval);
+    
+    const totalGeneration = readings.reduce((sum, r) => sum + (r.total_energy || 0), 0);
+    const avgPower = readings.length > 0 ? readings.reduce((sum, r) => sum + (r.avg_power || 0), 0) / readings.length : 0;
+    const maxPower = readings.length > 0 ? Math.max(...readings.map(r => r.max_power || 0)) : 0;
+
+    // Get list of devices for this user
+    const devicesResult = await db.query(
+      `SELECT device_id, device_name FROM devices WHERE user_id = $1 ORDER BY created_at DESC`,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        user_id: userId,
+        device_count: devicesResult.rows.length,
+        devices: devicesResult.rows,
+        readings: readings,
+        summary: {
+          total_energy_kwh: parseFloat(totalGeneration.toFixed(2)),
+          avg_power_kw: parseFloat(avgPower.toFixed(2)),
+          max_power_kw: parseFloat(maxPower.toFixed(2)),
+          reading_count: readings.length,
+        },
+        period: {
+          start: start.toISOString(),
+          end: end.toISOString(),
+          interval,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Error getting combined production:', error);
+    res.status(500).json({ success: false, error: 'InternalServerError', message: error.message });
+  }
 });
 
 module.exports = {
   ingestData,
   getLatestReading,
   getReadingHistory,
+  getDeviceProduction,
+  getCombinedProduction,
   registerDevice,
   getDevices,
   getDevice,

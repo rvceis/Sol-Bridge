@@ -182,4 +182,16 @@ router.get('/iot/readings/latest', authenticate, (req, res, next) => iotControll
  */
 router.get('/iot/readings/history', authenticate, (req, res, next) => iotController.getReadingHistory(req, res, next));
 
+/**
+ * GET /api/iot/production/device/:deviceId - Get production data for a specific device
+ * Query params: startDate, endDate, interval (hourly|daily|weekly)
+ */
+router.get('/iot/production/device/:deviceId', authenticate, (req, res, next) => iotController.getDeviceProduction(req, res, next));
+
+/**
+ * GET /api/iot/production/combined - Get combined production for all user's devices
+ * Query params: startDate, endDate, interval (hourly|daily|weekly)
+ */
+router.get('/iot/production/combined', authenticate, (req, res, next) => iotController.getCombinedProduction(req, res, next));
+
 module.exports = router;
