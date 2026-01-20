@@ -54,24 +54,24 @@ void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
     
-    // Initialize NTP time sync
-    Serial.println("Syncing time with NTP server...");
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    // Initialize NTP time sync with reduced timeout
+    Serial.println("Syncing time with NTP...");
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer, "time.google.com");
     
-    // Wait for time to be set
+    // Only wait 3 seconds for NTP - backend will use server time if this fails
     struct tm timeinfo;
     int retries = 0;
-    while (!getLocalTime(&timeinfo) && retries < 10) {
+    while (!getLocalTime(&timeinfo) && retries < 3) {
       Serial.print(".");
       delay(1000);
       retries++;
     }
     
-    if (retries < 10) {
-      Serial.println("\nTime synchronized!");
-      Serial.printf("Current time: %s", asctime(&timeinfo));
+    if (retries < 3) {
+      Serial.println(" OK!");
+      Serial.printf("Time: %s", asctime(&timeinfo));
     } else {
-      Serial.println("\nFailed to sync time, will use server time");
+      Serial.println(" timeout (backend will use server time)");
     }
   } else {
     Serial.println("WiFi connection failed");
@@ -82,7 +82,7 @@ void connectWifi() {
 String getTimestamp() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    Serial.println("Failed to get time, using 1970 epoch");
+    // Return 1970 - backend will detect and use server time
     return "1970-01-01T00:00:00Z";
   }
   

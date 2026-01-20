@@ -32,9 +32,15 @@ const ingestData = asyncHandler(async (req, res) => {
   try {
     data = validate(data, schemas.iotData);
   } catch (validationError) {
-    logger.error('Validation failed:', validationError.message);
-    logger.error('Data received:', JSON.stringify(data));
-    throw validationError;
+    logger.error('IoT Validation failed:', validationError.message);
+    logger.error('Data received:', JSON.stringify(data, null, 2));
+    logger.error('Full error:', validationError);
+    return res.status(400).json({
+      success: false,
+      error: 'ValidationError',
+      message: validationError.message,
+      details: validationError.details,
+    });
   }
   
   await iotService.handleMessage(
