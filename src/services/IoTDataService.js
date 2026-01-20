@@ -620,11 +620,11 @@ class IoTDataService {
       let query = `
         SELECT 
           time_bucket('1 ${interval}', time) as time,
-          AVG(power_kw) as avg_power,
-          MAX(power_kw) as max_power,
-          MIN(power_kw) as min_power,
-          SUM(energy_kwh) as total_energy,
-          AVG(temperature) as avg_temperature
+          AVG(power_kw)::FLOAT as avg_power,
+          MAX(power_kw)::FLOAT as max_power,
+          MIN(power_kw)::FLOAT as min_power,
+          SUM(energy_kwh)::FLOAT as total_energy,
+          AVG(temperature)::FLOAT as avg_temperature
         FROM energy_readings
         WHERE device_id = $1 AND time BETWEEN $2 AND $3
         GROUP BY time_bucket('1 ${interval}', time)
@@ -632,7 +632,18 @@ class IoTDataService {
       `;
 
       const result = await db.query(query, [deviceId, startDate, endDate]);
-      return result.rows || [];
+      
+      // Ensure all numeric values are properly formatted
+      const rows = (result.rows || []).map(row => ({
+        time: row.time,
+        avg_power: parseFloat(row.avg_power) || 0,
+        max_power: parseFloat(row.max_power) || 0,
+        min_power: parseFloat(row.min_power) || 0,
+        total_energy: parseFloat(row.total_energy) || 0,
+        avg_temperature: parseFloat(row.avg_temperature) || null,
+      }));
+      
+      return rows;
     } catch (error) {
       logger.error('Error getting device production:', error);
       throw error;
@@ -653,11 +664,11 @@ class IoTDataService {
       let query = `
         SELECT 
           time_bucket('1 ${interval}', time) as time,
-          AVG(power_kw) as avg_power,
-          MAX(power_kw) as max_power,
-          MIN(power_kw) as min_power,
-          SUM(energy_kwh) as total_energy,
-          AVG(temperature) as avg_temperature
+          AVG(power_kw)::FLOAT as avg_power,
+          MAX(power_kw)::FLOAT as max_power,
+          MIN(power_kw)::FLOAT as min_power,
+          SUM(energy_kwh)::FLOAT as total_energy,
+          AVG(temperature)::FLOAT as avg_temperature
         FROM energy_readings
         WHERE user_id = $1 AND time BETWEEN $2 AND $3
         GROUP BY time_bucket('1 ${interval}', time)
@@ -665,6 +676,18 @@ class IoTDataService {
       `;
 
       const result = await db.query(query, [userId, startDate, endDate]);
+      
+      // Ensure all numeric values are properly formatted
+      const rows = (result.rows || []).map(row => ({
+        time: row.time,
+        avg_power: parseFloat(row.avg_power) || 0,
+        max_power: parseFloat(row.max_power) || 0,
+        min_power: parseFloat(row.min_power) || 0,
+        total_energy: parseFloat(row.total_energy) || 0,
+        avg_temperature: parseFloat(row.avg_temperature) || null,
+      }));
+      
+      return rows;
       return result.rows || [];
     } catch (error) {
       logger.error('Error getting combined production:', error);
