@@ -1,6 +1,7 @@
 const db = require('../database');
 const logger = require('../utils/logger');
 const PushNotificationService = require('./PushNotificationService');
+const ReportService = require('./ReportService');
 
 class MarketplaceService {
   // Create energy listing
@@ -330,6 +331,16 @@ class MarketplaceService {
       ).catch(err => logger.error('Failed to send payment notification:', err));
 
       await client.query('COMMIT');
+      
+      // Generate transaction report asynchronously (don't wait for it)
+      ReportService.generateTransactionReport(transaction.id)
+        .then(report => {
+          logger.info(`✓ Transaction report generated: ${report.files.csv}`);
+        })
+        .catch(err => {
+          logger.error('Failed to generate transaction report:', err);
+        });
+      
       return transaction;
     } catch (error) {
       await client.query('ROLLBACK');

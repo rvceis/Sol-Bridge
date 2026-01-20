@@ -33,6 +33,7 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const investmentRoutes = require('./routes/investmentRoutes');
 const registrationRoutes = require('./routes/registrationRoutes');
 const reportsRoutes = require('./routes/reportsRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 const energySourceRoutes = require('./routes/energySourceRoutes');
 
 // Services
@@ -116,6 +117,7 @@ app.use(`/api/${config.apiVersion}/investments`, investmentRoutes);
 app.use(`/api/${config.apiVersion}/host`, registrationRoutes);
 app.use(`/api/${config.apiVersion}/industry`, registrationRoutes);
 app.use(`/api/${config.apiVersion}/reports`, reportsRoutes);
+app.use(`/api/${config.apiVersion}/report`, reportRoutes);
 app.use(`/api/${config.apiVersion}/energy-sources`, energySourceRoutes);
 
 // ===== 404 Handler =====
@@ -146,6 +148,11 @@ const startServer = async () => {
 
     // Run migrations for constraint updates and other schema changes
     await runMigrations();
+    
+    // Initialize wallet balances for testing
+    const { initializeWalletBalances } = require('./utils/initWallets');
+    await initializeWalletBalances();
+    
     try {
       await iotManager.initMQTT();
       logger.info('✓ IoT Manager initialized with MQTT');
