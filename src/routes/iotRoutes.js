@@ -200,6 +200,21 @@ router.get('/iot/production/combined', authenticate, (req, res, next) => iotCont
 router.get('/iot/device/:deviceId/latest', authenticate, (req, res, next) => iotController.getDeviceLatestReading(req, res, next));
 
 /**
+ * GET /api/iot/device/:deviceId/raw - Get raw readings for analytics (no aggregation)
+ * Query params: startDate, endDate, limit
+ */
+router.get('/iot/device/:deviceId/raw', authenticate, (req, res, next) => iotController.getRawReadings(req, res, next));
+
+/**
+ * GET /api/iot/raw - Get all raw readings for user (no aggregation)
+ * Query params: startDate, endDate, limit
+ */
+router.get('/iot/raw', authenticate, (req, res, next) => {
+  req.params.deviceId = null; // Clear deviceId for combined readings
+  iotController.getRawReadings(req, res, next);
+});
+
+/**
  * GET /api/weather/solar-radiation - Get solar radiation at user's device location (daytime only)
  */
 router.get('/weather/solar-radiation', authenticate, async (req, res) => {

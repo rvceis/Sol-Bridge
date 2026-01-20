@@ -225,6 +225,40 @@ const getLatestReading = asyncHandler(async (req, res) => {
   });
 });
 
+// Get raw readings for analytics (no aggregation)
+const getRawReadings = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Login required' });
+  }
+
+  const { deviceId } = req.params;
+  const { startDate, endDate, limit = 1000 } = req.query;
+
+  const start = startDate ? new Date(startDate) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const end = endDate ? new Date(endDate) : new Date();
+
+  try {
+    const readings = await iotService.getRawReadings(deviceId, userId, start, end, parseInt(limit));
+    
+    res.json({
+      success: true,
+      data: {
+        device_id: deviceId || 'all',
+        readings,
+        count: readings.length,
+        period: {
+          start: start.toISOString(),
+          end: end.toISOString(),
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Error getting raw readings:', error);
+    res.status(500).json({ success: false, error: 'InternalServerError', message: error.message });
+  }
+});
+
 // Get reading history - uses authenticated user's ID
 const getReadingHistory = asyncHandler(async (req, res) => {
   const userId = req.user?.id;
@@ -574,6 +608,7 @@ module.exports = {
   ingestData,
   getLatestReading,
   getDeviceLatestReading,
+  getRawReadings,
   getReadingHistory,
   getDeviceProduction,
   getCombinedProduction,

@@ -634,17 +634,15 @@ class IoTDataService {
       const result = await db.query(query, [deviceId, startDate, endDate]);
       
       // Ensure all numeric values are properly formatted
-      const intervalHours = interval === 'hour' ? 1 : interval === 'day' ? 24 : 24 * 7;
       const rows = (result.rows || []).map(row => {
         const avgPower = parseFloat(row.avg_power) || 0;
-        const totalEnergy = parseFloat(row.total_energy);
-        const derivedEnergy = avgPower * intervalHours; // kWh = kW * hours
+        const totalEnergy = parseFloat(row.total_energy) || 0;
         return {
           time: row.time,
           avg_power: avgPower,
           max_power: parseFloat(row.max_power) || 0,
           min_power: parseFloat(row.min_power) || 0,
-          total_energy: isNaN(totalEnergy) || totalEnergy === 0 ? derivedEnergy : totalEnergy,
+          total_energy: totalEnergy,
           avg_temperature: parseFloat(row.avg_temperature) || null,
         };
       });
@@ -652,6 +650,48 @@ class IoTDataService {
       return rows;
     } catch (error) {
       logger.error('Error getting device production:', error);
+      throw error;
+    }
+  }
+
+  // Get raw readings for analytics (no aggregation)
+  async getRawReadings(deviceId, userId, startDate, endDate, limit = 1000) {
+    try {
+      const query = `
+        SELECT 
+          time,
+          device_id,
+          power_kw,
+          energy_kwh,
+          voltage,
+          current,
+          temperature
+        FROM energy_readings
+        WHERE ${deviceId ? 'device_id = $1 AND user_id = $2' : 'user_id = $1'}
+          AND time BETWEEN $${deviceId ? '3' : '2'} AND $${deviceId ? '4' : '3'}
+        ORDER BY time DESC
+        LIMIT $${deviceId ? '5' : '4'}
+      `;
+
+      const params = deviceId 
+        ? [deviceId, userId, startDate, endDate, limit]
+        : [userId, startDate, endDate, limit];
+
+      const result = await db.query(query, params);
+      
+      return (result.rows || []).map(row => ({
+        time: row.time,
+        device_id: row.device_id,
+        power_kw: parseFloat(row.power_kw) || 0,
+        power_w: (parseFloat(row.power_kw) || 0) * 1000,
+        energy_kwh: parseFloat(row.energy_kwh) || 0,
+        energy_wh: (parseFloat(row.energy_kwh) || 0) * 1000,
+        voltage: parseFloat(row.voltage) || 0,
+        current: parseFloat(row.current) || 0,
+        temperature: parseFloat(row.temperature) || null,
+      }));
+    } catch (error) {
+      logger.error('Error getting raw readings:', error);
       throw error;
     }
   }
@@ -684,17 +724,15 @@ class IoTDataService {
       const result = await db.query(query, [userId, startDate, endDate]);
       
       // Ensure all numeric values are properly formatted
-      const intervalHours = interval === 'hour' ? 1 : interval === 'day' ? 24 : 24 * 7;
       const rows = (result.rows || []).map(row => {
         const avgPower = parseFloat(row.avg_power) || 0;
-        const totalEnergy = parseFloat(row.total_energy);
-        const derivedEnergy = avgPower * intervalHours; // kWh
+        const totalEnergy = parseFloat(row.total_energy) || 0;
         return {
           time: row.time,
           avg_power: avgPower,
           max_power: parseFloat(row.max_power) || 0,
           min_power: parseFloat(row.min_power) || 0,
-          total_energy: isNaN(totalEnergy) || totalEnergy === 0 ? derivedEnergy : totalEnergy,
+          total_energy: totalEnergy,
           avg_temperature: parseFloat(row.avg_temperature) || null,
         };
       });
