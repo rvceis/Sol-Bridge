@@ -688,7 +688,6 @@ class IoTDataService {
       }));
       
       return rows;
-      return result.rows || [];
     } catch (error) {
       logger.error('Error getting combined production:', error);
       throw error;
