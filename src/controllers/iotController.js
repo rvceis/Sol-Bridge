@@ -5,7 +5,25 @@ const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 
 // Ingest IoT data
 const ingestData = asyncHandler(async (req, res) => {
-  const data = validate(req.body, schemas.iotData);
+  // Allow both old format (with user_id) and new format (device_id only)
+  let data = req.body;
+  
+  // If user_id not provided, look it up from device_id
+  if (!data.user_id && data.device_id) {
+    const device = await iotService.getDeviceByIdOnly(data.device_id);
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        error: 'DeviceNotFound',
+        message: 'Device not registered. Please register device through the app first.',
+      });
+    }
+    data.user_id = device.user_id;
+  }
+  
+  // Validate complete data
+  data = validate(data, schemas.iotData);
+  
   await iotService.handleMessage(
     `energy/${data.user_id}/device/reading`,
     Buffer.from(JSON.stringify(data))

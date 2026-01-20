@@ -544,6 +544,23 @@ class IoTDataService {
     }
   }
 
+  async getDeviceByIdOnly(deviceId) {
+    try {
+      const query = `
+        SELECT device_id, user_id, device_type, device_model, firmware_version, status, 
+               last_seen_at, installation_date, created_at, updated_at,
+               last_reading
+        FROM devices
+        WHERE device_id = $1
+      `;
+      const result = await db.query(query, [deviceId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error fetching device:', error);
+      throw error;
+    }
+  }
+
   async updateDevice(deviceId, userId, { deviceModel, status, configuration }) {
     try {
       const updates = [];
