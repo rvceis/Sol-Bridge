@@ -14,13 +14,14 @@ router.get('/ai/forecast/solar', authenticate, async (req, res) => {
     const userId = req.user?.id;
     const { hours = 24 } = req.query;
 
-    // Call ML service
-    const response = await axios.get(`${ML_SERVICE_URL}/api/forecast/solar`, {
-      params: {
-        user_id: userId,
-        hours: parseInt(hours),
-      },
+    // Call ML service (POST endpoint)
+    const response = await axios.post(`${ML_SERVICE_URL}/forecast/solar`, {
+      hours: parseInt(hours),
+    }, {
       timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
     res.json({
@@ -45,13 +46,14 @@ router.get('/ai/forecast/demand', authenticate, async (req, res) => {
     const userId = req.user?.id;
     const { hours = 24 } = req.query;
 
-    // Call ML service
-    const response = await axios.get(`${ML_SERVICE_URL}/api/forecast/demand`, {
-      params: {
-        user_id: userId,
-        hours: parseInt(hours),
-      },
+    // Call ML service (POST endpoint)
+    const response = await axios.post(`${ML_SERVICE_URL}/forecast/demand`, {
+      hours: parseInt(hours),
+    }, {
       timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
     res.json({
@@ -75,17 +77,17 @@ router.get('/ai/anomalies', authenticate, async (req, res) => {
   try {
     const userId = req.user?.id;
 
-    // Call ML service
-    const response = await axios.get(`${ML_SERVICE_URL}/api/anomalies`, {
-      params: {
-        user_id: userId,
-      },
+    // Call ML service (POST endpoint)
+    const response = await axios.post(`${ML_SERVICE_URL}/anomaly/detect`, {}, {
       timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
     res.json({
       success: true,
-      data: response.data.data || [],
+      data: response.data.data || response.data || [],
     });
   } catch (error) {
     logger.error('Anomaly detection error:', error.message);

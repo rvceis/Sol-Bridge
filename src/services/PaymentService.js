@@ -50,14 +50,14 @@ class PaymentService {
           INSERT INTO payments (
             id, user_id, amount, currency, payment_type, status,
             gateway, gateway_order_id, metadata
-          ) VALUES ($1, $2, $3, $4, 'wallet_topup', 'pending', 'test', $5, $6)
+          ) VALUES ($1, $2, $3, $4, 'wallet_topup', 'pending', 'razorpay', $5, $6)
         `, [
           paymentId,
           userId,
           amount,
           currency,
           mockOrderId,
-          JSON.stringify({ test_mode: true, created_at: new Date().toISOString() }),
+          JSON.stringify({ test_mode: true, mock_payment: true, created_at: new Date().toISOString() }),
         ]);
 
         logger.info({ action: 'test_payment_created', userId, amount, orderId: mockOrderId });
