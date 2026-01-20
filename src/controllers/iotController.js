@@ -351,9 +351,31 @@ const getDeviceProduction = asyncHandler(async (req, res) => {
   try {
     const readings = await iotService.getDeviceProduction(deviceId, start, end, interval);
     
-    const totalGeneration = readings.reduce((sum, r) => sum + (r.total_energy || 0), 0);
-    const avgPower = readings.length > 0 ? readings.reduce((sum, r) => sum + (r.avg_power || 0), 0) / readings.length : 0;
-    const maxPower = readings.length > 0 ? Math.max(...readings.map(r => r.max_power || 0)) : 0;
+    // Handle empty or invalid readings
+    if (!readings || !Array.isArray(readings) || readings.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          device_id: deviceId,
+          readings: [],
+          summary: {
+            total_energy_kwh: 0,
+            avg_power_kw: 0,
+            max_power_kw: 0,
+            reading_count: 0,
+          },
+          period: {
+            start: start.toISOString(),
+            end: end.toISOString(),
+            interval,
+          },
+        },
+      });
+    }
+    
+    const totalGeneration = parseFloat(readings.reduce((sum, r) => sum + (parseFloat(r.total_energy) || 0), 0).toFixed(2));
+    const avgPower = readings.length > 0 ? parseFloat((readings.reduce((sum, r) => sum + (parseFloat(r.avg_power) || 0), 0) / readings.length).toFixed(2)) : 0;
+    const maxPower = readings.length > 0 ? parseFloat(Math.max(...readings.map(r => parseFloat(r.max_power) || 0)).toFixed(2)) : 0;
 
     res.json({
       success: true,
@@ -361,9 +383,9 @@ const getDeviceProduction = asyncHandler(async (req, res) => {
         device_id: deviceId,
         readings: readings,
         summary: {
-          total_energy_kwh: parseFloat(totalGeneration.toFixed(2)),
-          avg_power_kw: parseFloat(avgPower.toFixed(2)),
-          max_power_kw: parseFloat(maxPower.toFixed(2)),
+          total_energy_kwh: totalGeneration,
+          avg_power_kw: avgPower,
+          max_power_kw: maxPower,
           reading_count: readings.length,
         },
         period: {
@@ -395,9 +417,38 @@ const getCombinedProduction = asyncHandler(async (req, res) => {
   try {
     const readings = await iotService.getCombinedProduction(userId, start, end, interval);
     
-    const totalGeneration = readings.reduce((sum, r) => sum + (r.total_energy || 0), 0);
-    const avgPower = readings.length > 0 ? readings.reduce((sum, r) => sum + (r.avg_power || 0), 0) / readings.length : 0;
-    const maxPower = readings.length > 0 ? Math.max(...readings.map(r => r.max_power || 0)) : 0;
+    // Handle empty or invalid readings
+    if (!readings || !Array.isArray(readings) || readings.length === 0) {
+      const devicesResult = await db.query(
+        `SELECT device_id, device_name FROM devices WHERE user_id = $1 ORDER BY created_at DESC`,
+        [userId]
+      );
+      
+      return res.json({
+        success: true,
+        data: {
+          user_id: userId,
+          device_count: devicesResult.rows.length,
+          devices: devicesResult.rows,
+          readings: [],
+          summary: {
+            total_energy_kwh: 0,
+            avg_power_kw: 0,
+            max_power_kw: 0,
+            reading_count: 0,
+          },
+          period: {
+            start: start.toISOString(),
+            end: end.toISOString(),
+            interval,
+          },
+        },
+      });
+    }
+    
+    const totalGeneration = parseFloat(readings.reduce((sum, r) => sum + (parseFloat(r.total_energy) || 0), 0).toFixed(2));
+    const avgPower = readings.length > 0 ? parseFloat((readings.reduce((sum, r) => sum + (parseFloat(r.avg_power) || 0), 0) / readings.length).toFixed(2)) : 0;
+    const maxPower = readings.length > 0 ? parseFloat(Math.max(...readings.map(r => parseFloat(r.max_power) || 0)).toFixed(2)) : 0;
 
     // Get list of devices for this user
     const devicesResult = await db.query(
@@ -413,9 +464,9 @@ const getCombinedProduction = asyncHandler(async (req, res) => {
         devices: devicesResult.rows,
         readings: readings,
         summary: {
-          total_energy_kwh: parseFloat(totalGeneration.toFixed(2)),
-          avg_power_kw: parseFloat(avgPower.toFixed(2)),
-          max_power_kw: parseFloat(maxPower.toFixed(2)),
+          total_energy_kwh: totalGeneration,
+          avg_power_kw: avgPower,
+          max_power_kw: maxPower,
           reading_count: readings.length,
         },
         period: {
