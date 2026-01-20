@@ -98,16 +98,24 @@ class IoTDataService {
       // Validate message
       const validationResult = await this.validateMessage(data, userId);
       if (!validationResult.valid) {
-        logger.warn('Message validation failed:', validationResult.error);
+        logger.error('Message validation failed:', validationResult.error);
+        logger.error('Failed data:', JSON.stringify(data, null, 2));
         await this.handleInvalidData(topic, data, validationResult.error);
         return;
       }
 
+      logger.info('✅ Validation passed, enriching data...');
+      
       // Enrich data
       const enrichedData = await this.enrichData(data, userId, measurementType);
 
+      logger.info('✅ Data enriched, storing...');
+      
       // Store data
       await this.storeData(enrichedData, userId, measurementType);
+      
+      logger.info('✅ Data stored successfully');
+
 
       // Publish event
       await this.publishEvent('new_energy_data', enrichedData);
@@ -157,10 +165,19 @@ class IoTDataService {
       }
 
       // Verify device exists and belongs to user
-      const deviceResult = await db.query(
-        'SELECT * FROM devices WHERE device_id = $1 AND user_id = $2',
-        [data.device_id, userId]
-      );
+      let deviceResult;
+      try {
+        deviceResult = await db.query(
+          'SELECT * FROM devices WHERE device_id = $1 AND user_id = $2',
+          [data.device_id, userId]
+        );
+      } catch (dbError) {
+        logger.error(`Database query error for device ${data.device_id}:`, dbError);
+        return {
+          valid: false,
+          error: `Database error: ${dbError.message}`,
+        };
+      }
 
       if (deviceResult.rows.length === 0) {
         logger.error(`Device ${data.device_id} not found for user ${userId}`);
@@ -180,13 +197,14 @@ class IoTDataService {
       }
 
       // Skip range validation - accept all sensor readings
-      logger.info(`Validation passed for device ${data.device_id} - accepting all measurements`);
+      logger.info(`✅ Validation passed for device ${data.device_id} - accepting all measurements`);
       return { valid: true };
     } catch (error) {
       logger.error('Validation error:', error);
+      logger.error('Error stack:', error.stack);
       return {
         valid: false,
-        error: error.message,
+        error: `Validation exception: ${error.message}`,
       };
     }
   }

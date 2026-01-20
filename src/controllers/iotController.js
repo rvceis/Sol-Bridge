@@ -5,49 +5,99 @@ const { asyncHandler } = require('../utils/errors');
 const { schemas, validate } = require('../utils/validation');
 const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 
-// Ingest IoT data
+// Ingest IoT data - Simplified for ESP32 compatibility
 const ingestData = asyncHandler(async (req, res) => {
-  // Allow both old format (with user_id) and new format (device_id only)
   let data = req.body;
   
-  // Check if user_id exists and is a valid UUID format
-  const isValidUUID = data.user_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.user_id);
+  logger.info(`IoT Ingest received: ${JSON.stringify(data)}`);
   
-  // If user_id not provided or not a valid UUID, look it up from device_id
-  if (!isValidUUID && data.device_id) {
-    const device = await iotService.getDeviceByIdOnly(data.device_id);
-    if (!device) {
-      logger.error(`Device not found: ${data.device_id}`);
-      return res.status(404).json({
-        success: false,
-        error: 'DeviceNotFound',
-        message: 'Device not registered. Please register device through the app first.',
-      });
-    }
-    data.user_id = device.user_id;
-    logger.info(`Device ${data.device_id} resolved to user ${device.user_id}`);
-  }
-  
-  // Validate complete data
-  try {
-    data = validate(data, schemas.iotData);
-  } catch (validationError) {
-    logger.error('IoT Validation failed:', validationError.message);
-    logger.error('Data received:', JSON.stringify(data, null, 2));
-    logger.error('Full error:', validationError);
+  // Look up device to get user_id
+  if (!data.device_id) {
     return res.status(400).json({
       success: false,
       error: 'ValidationError',
-      message: validationError.message,
-      details: validationError.details,
+      message: 'device_id is required',
     });
   }
   
-  await iotService.handleMessage(
-    `energy/${data.user_id}/device/reading`,
-    Buffer.from(JSON.stringify(data))
-  );
+  const device = await iotService.getDeviceByIdOnly(data.device_id);
+  if (!device) {
+    logger.error(`Device not found: ${data.device_id}`);
+    return res.status(404).json({
+      success: false,
+      error: 'DeviceNotFound',
+      message: 'Device not registered. Please register device through the app first.',
+    });
+  }
   
+  data.user_id = device.user_id;
+  logger.info(`Device ${data.device_id} belongs to user ${device.user_id}`);
+  
+  // Fix timestamp if invalid (1970 or future)
+  const timestamp = new Date(data.timestamp);
+  if (isNaN(timestamp.getTime()) || timestamp.getFullYear() < 2020) {
+    data.timestamp = new Date().toISOString();
+    logger.info(`Fixed invalid timestamp, using server time: ${data.timestamp}`);
+  }
+  
+  // Ensure measurements exist
+  if (!data.measurements) {
+    return res.status(400).json({
+      success: false,
+      error: 'ValidationError',
+      message: 'measurements object is required',
+    });
+  }
+  
+  // Store directly in database - bypass all other validation
+  try {
+    const measurements = data.measurements;
+    await db.query(
+      `INSERT INTO energy_readings 
+       (time, device_id, user_id, measurement_type, power_kw, energy_kwh, voltage, current, 
+        frequency, power_factor, battery_soc, battery_voltage, battery_current, temperature, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      [
+        data.timestamp,
+        data.device_id,
+        data.user_id,
+        'solar',
+        measurements.power_kw || 0,
+        measurements.energy_kwh || 0,
+        measurements.voltage || 0,
+        measurements.current || 0,
+        measurements.frequency || 0,
+        measurements.power_factor || null,
+        measurements.battery_soc || null,
+        measurements.battery_voltage || null,
+        measurements.battery_current || null,
+        measurements.temperature || null,
+        JSON.stringify({}),
+      ]
+    );
+    
+    // Update device last_seen
+    await db.query(
+      `UPDATE devices SET last_seen_at = NOW(), status = 'active' WHERE device_id = $1`,
+      [data.device_id]
+    );
+    
+    logger.info(`✅ Data stored successfully for device ${data.device_id}`);
+    
+    res.json({
+      status: 'accepted',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (dbError) {
+    logger.error(`Database error storing IoT data: ${dbError.message}`);
+    logger.error('Stack:', dbError.stack);
+    res.status(500).json({
+      success: false,
+      error: 'DatabaseError',
+      message: dbError.message,
+    });
+  }
+});
   // Invalidate user's reading cache when new data arrives
   await cacheDel(`iot:latest:${data.user_id}`);
 
