@@ -140,6 +140,34 @@ const schemas = {
   refreshToken: Joi.object({
     refreshToken: Joi.string().required(),
   }),
+
+  walletTopup: Joi.object({
+    amount: Joi.number()
+      .positive()
+      .min(1)
+      .max(50000)
+      .required()
+      .messages({
+        'number.positive': 'Amount must be positive',
+        'number.min': 'Minimum top-up amount is ₹1',
+        'number.max': 'Maximum top-up amount is ₹50,000',
+      }),
+    currency: Joi.string()
+      .valid('INR', 'USD')
+      .default('INR'),
+  }),
+
+  withdrawal: Joi.object({
+    amount: Joi.number()
+      .positive()
+      .min(100)
+      .required()
+      .messages({
+        'number.positive': 'Amount must be positive',
+        'number.min': 'Minimum withdrawal amount is ₹100',
+      }),
+    bank_account_id: Joi.string().required(),
+  }),
 };
 
 // Validate function
