@@ -8,10 +8,9 @@ const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 // Ingest IoT data - Simplified for ESP32 compatibility
 const ingestData = asyncHandler(async (req, res) => {
   let data = req.body;
-  
+
   logger.info(`IoT Ingest received: ${JSON.stringify(data)}`);
-  
-  // Look up device to get user_id
+
   if (!data.device_id) {
     return res.status(400).json({
       success: false,
@@ -19,7 +18,7 @@ const ingestData = asyncHandler(async (req, res) => {
       message: 'device_id is required',
     });
   }
-  
+
   const device = await iotService.getDeviceByIdOnly(data.device_id);
   if (!device) {
     logger.error(`Device not found: ${data.device_id}`);
@@ -29,18 +28,16 @@ const ingestData = asyncHandler(async (req, res) => {
       message: 'Device not registered. Please register device through the app first.',
     });
   }
-  
+
   data.user_id = device.user_id;
   logger.info(`Device ${data.device_id} belongs to user ${device.user_id}`);
-  
-  // Fix timestamp if invalid (1970 or future)
+
   const timestamp = new Date(data.timestamp);
   if (isNaN(timestamp.getTime()) || timestamp.getFullYear() < 2020) {
     data.timestamp = new Date().toISOString();
     logger.info(`Fixed invalid timestamp, using server time: ${data.timestamp}`);
   }
-  
-  // Ensure measurements exist
+
   if (!data.measurements) {
     return res.status(400).json({
       success: false,
@@ -48,22 +45,18 @@ const ingestData = asyncHandler(async (req, res) => {
       message: 'measurements object is required',
     });
   }
-  
-  // Store directly in database - bypass all other validation
+
   try {
     const measurements = data.measurements;
-    
-    // Calculate power from voltage and current if not provided
+
     let powerKw = parseFloat(measurements.power_kw) || 0;
     if (powerKw === 0 && measurements.voltage && measurements.current) {
-      // P(W) = V × I, convert to kW
       powerKw = (measurements.voltage * measurements.current) / 1000;
       logger.info(`Calculated power: ${powerKw} kW from V:${measurements.voltage}V × I:${measurements.current}A`);
     }
-    
-    // For small installations, store energy in Wh instead of kWh for better precision
+
     const energyKwh = parseFloat(measurements.energy_kwh) || 0;
-    
+
     await db.query(
       `INSERT INTO energy_readings 
        (time, device_id, user_id, measurement_type, power_kw, energy_kwh, voltage, current, 
@@ -90,15 +83,14 @@ const ingestData = asyncHandler(async (req, res) => {
         }),
       ]
     );
-    
-    // Update device last_seen
+
     await db.query(
       `UPDATE devices SET last_seen_at = NOW(), status = 'active' WHERE device_id = $1`,
       [data.device_id]
     );
-    
+
     logger.info(`✅ Data stored: Power=${powerKw}kW, V=${measurements.voltage}V, I=${measurements.current}A`);
-    
+
     res.json({
       status: 'accepted',
       timestamp: new Date().toISOString(),
