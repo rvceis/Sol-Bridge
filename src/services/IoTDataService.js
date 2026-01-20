@@ -623,9 +623,17 @@ class IoTDataService {
   // Get device production data (single device)
   async getDeviceProduction(deviceId, startDate, endDate, resolution = 'hourly') {
     try {
+      // Convert resolution format: hourly->hour, daily->day, weekly->week
+      const intervalMap = {
+        hourly: 'hour',
+        daily: 'day',
+        weekly: 'week'
+      };
+      const interval = intervalMap[resolution] || 'hour';
+      
       let query = `
         SELECT 
-          time_bucket('1 ${resolution}', time) as time,
+          time_bucket('1 ${interval}', time) as time,
           AVG(power_kw) as avg_power,
           MAX(power_kw) as max_power,
           MIN(power_kw) as min_power,
@@ -633,7 +641,7 @@ class IoTDataService {
           AVG(temperature) as avg_temperature
         FROM energy_readings
         WHERE device_id = $1 AND time BETWEEN $2 AND $3
-        GROUP BY time_bucket('1 ${resolution}', time)
+        GROUP BY time_bucket('1 ${interval}', time)
         ORDER BY time DESC
       `;
 
@@ -648,9 +656,17 @@ class IoTDataService {
   // Get combined production data (all devices for user)
   async getCombinedProduction(userId, startDate, endDate, resolution = 'hourly') {
     try {
+      // Convert resolution format: hourly->hour, daily->day, weekly->week
+      const intervalMap = {
+        hourly: 'hour',
+        daily: 'day',
+        weekly: 'week'
+      };
+      const interval = intervalMap[resolution] || 'hour';
+      
       let query = `
         SELECT 
-          time_bucket('1 ${resolution}', time) as time,
+          time_bucket('1 ${interval}', time) as time,
           AVG(power_kw) as avg_power,
           MAX(power_kw) as max_power,
           MIN(power_kw) as min_power,
@@ -658,7 +674,7 @@ class IoTDataService {
           AVG(temperature) as avg_temperature
         FROM energy_readings
         WHERE user_id = $1 AND time BETWEEN $2 AND $3
-        GROUP BY time_bucket('1 ${resolution}', time)
+        GROUP BY time_bucket('1 ${interval}', time)
         ORDER BY time DESC
       `;
 
