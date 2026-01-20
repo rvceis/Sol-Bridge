@@ -54,4 +54,11 @@ router.get('/devices', authenticate, weatherController.getAllDevicesWeather);
  */
 router.get('/device/:deviceId/solar-forecast', authenticate, weatherController.getDeviceSolarForecast);
 
+/**
+ * @route   GET /api/v1/weather/solar-radiation
+ * @desc    Get current solar radiation (daytime only)
+ * @access  Private
+ */
+router.get('/solar-radiation', authenticate, weatherController.getSolarRadiation);
+
 module.exports = router;

@@ -7,6 +7,72 @@ const { cacheGet, cacheSet, cacheDel } = require('../utils/cache');
 
 // Ingest IoT data - Simplified for ESP32 compatibility
 const ingestData = asyncHandler(async (req, res) => {
+// Get latest reading for a specific device
+const getDeviceLatestReading = asyncHandler(async (req, res) => {
+  const userId = req.user?.id;
+  const { deviceId } = req.params;
+
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Login required' });
+  }
+
+  if (!deviceId) {
+    return res.status(400).json({ success: false, error: 'ValidationError', message: 'deviceId is required' });
+  }
+
+  // Verify device belongs to user
+  const deviceCheck = await db.query(
+    `SELECT device_id FROM devices WHERE device_id = $1 AND user_id = $2`,
+    [deviceId, userId]
+  );
+
+  if (deviceCheck.rows.length === 0) {
+    return res.status(404).json({ success: false, error: 'DeviceNotFound', message: 'Device not found or does not belong to you' });
+  }
+
+  // Fetch latest reading for this device
+  const result = await db.query(
+    `SELECT time, power_kw, energy_kwh, voltage, current, frequency, power_factor, battery_soc, temperature
+     FROM energy_readings
+     WHERE device_id = $1 AND user_id = $2
+     ORDER BY time DESC
+     LIMIT 1`,
+    [deviceId, userId]
+  );
+
+  const reading = result.rows[0];
+
+  if (!reading) {
+    return res.json({
+      success: true,
+      data: {
+        device_id: deviceId,
+        reading: null,
+        last_updated: null,
+        message: 'No readings found for this device.',
+      },
+    });
+  }
+
+  const powerKw = parseFloat(reading.power_kw) || 0;
+  const voltage = parseFloat(reading.voltage) || 0;
+  const current = parseFloat(reading.current) || 0;
+
+  res.json({
+    success: true,
+    data: {
+      device_id: deviceId,
+      reading: {
+        ...reading,
+        power_w: powerKw * 1000,
+        energy_wh: (parseFloat(reading.energy_kwh) || 0) * 1000,
+        voltage,
+        current,
+      },
+      last_updated: reading.time,
+    },
+  });
+});
   let data = req.body;
   
   logger.info(`IoT Ingest received: ${JSON.stringify(data)}`);
@@ -514,6 +580,7 @@ const getCombinedProduction = asyncHandler(async (req, res) => {
 module.exports = {
   ingestData,
   getLatestReading,
+  getDeviceLatestReading,
   getReadingHistory,
   getDeviceProduction,
   getCombinedProduction,

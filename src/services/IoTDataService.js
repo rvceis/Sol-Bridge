@@ -634,14 +634,20 @@ class IoTDataService {
       const result = await db.query(query, [deviceId, startDate, endDate]);
       
       // Ensure all numeric values are properly formatted
-      const rows = (result.rows || []).map(row => ({
-        time: row.time,
-        avg_power: parseFloat(row.avg_power) || 0,
-        max_power: parseFloat(row.max_power) || 0,
-        min_power: parseFloat(row.min_power) || 0,
-        total_energy: parseFloat(row.total_energy) || 0,
-        avg_temperature: parseFloat(row.avg_temperature) || null,
-      }));
+      const intervalHours = interval === 'hour' ? 1 : interval === 'day' ? 24 : 24 * 7;
+      const rows = (result.rows || []).map(row => {
+        const avgPower = parseFloat(row.avg_power) || 0;
+        const totalEnergy = parseFloat(row.total_energy);
+        const derivedEnergy = avgPower * intervalHours; // kWh = kW * hours
+        return {
+          time: row.time,
+          avg_power: avgPower,
+          max_power: parseFloat(row.max_power) || 0,
+          min_power: parseFloat(row.min_power) || 0,
+          total_energy: isNaN(totalEnergy) || totalEnergy === 0 ? derivedEnergy : totalEnergy,
+          avg_temperature: parseFloat(row.avg_temperature) || null,
+        };
+      });
       
       return rows;
     } catch (error) {
@@ -678,14 +684,20 @@ class IoTDataService {
       const result = await db.query(query, [userId, startDate, endDate]);
       
       // Ensure all numeric values are properly formatted
-      const rows = (result.rows || []).map(row => ({
-        time: row.time,
-        avg_power: parseFloat(row.avg_power) || 0,
-        max_power: parseFloat(row.max_power) || 0,
-        min_power: parseFloat(row.min_power) || 0,
-        total_energy: parseFloat(row.total_energy) || 0,
-        avg_temperature: parseFloat(row.avg_temperature) || null,
-      }));
+      const intervalHours = interval === 'hour' ? 1 : interval === 'day' ? 24 : 24 * 7;
+      const rows = (result.rows || []).map(row => {
+        const avgPower = parseFloat(row.avg_power) || 0;
+        const totalEnergy = parseFloat(row.total_energy);
+        const derivedEnergy = avgPower * intervalHours; // kWh
+        return {
+          time: row.time,
+          avg_power: avgPower,
+          max_power: parseFloat(row.max_power) || 0,
+          min_power: parseFloat(row.min_power) || 0,
+          total_energy: isNaN(totalEnergy) || totalEnergy === 0 ? derivedEnergy : totalEnergy,
+          avg_temperature: parseFloat(row.avg_temperature) || null,
+        };
+      });
       
       return rows;
     } catch (error) {

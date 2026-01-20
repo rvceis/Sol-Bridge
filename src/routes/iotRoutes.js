@@ -195,6 +195,11 @@ router.get('/iot/production/device/:deviceId', authenticate, (req, res, next) =>
 router.get('/iot/production/combined', authenticate, (req, res, next) => iotController.getCombinedProduction(req, res, next));
 
 /**
+ * GET /api/iot/device/:deviceId/latest - Get latest real-time reading for a device
+ */
+router.get('/iot/device/:deviceId/latest', authenticate, (req, res, next) => iotController.getDeviceLatestReading(req, res, next));
+
+/**
  * GET /api/weather/solar-radiation - Get solar radiation at user's device location (daytime only)
  */
 router.get('/weather/solar-radiation', authenticate, async (req, res) => {
